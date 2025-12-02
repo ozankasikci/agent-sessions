@@ -17,9 +17,24 @@ pub fn find_claude_processes() -> Vec<ClaudeProcess> {
     let mut processes = Vec::new();
 
     for (pid, process) in system.processes() {
-        let name = process.name().to_string_lossy().to_lowercase();
+        // Claude Code runs as a node process with "claude" as the first command argument
+        // We need to check the command line, not the process name
+        let cmd = process.cmd();
 
-        if name.contains("claude") && !name.contains("claude-sessions") {
+        // Check if first argument is "claude" or contains "claude" in the command
+        let is_claude = if let Some(first_arg) = cmd.first() {
+            let first_arg_str = first_arg.to_string_lossy().to_lowercase();
+            // Match "claude" as standalone command (not claude-sessions or other variants)
+            first_arg_str == "claude" || first_arg_str.ends_with("/claude")
+        } else {
+            false
+        };
+
+        // Also exclude our own app
+        let is_our_app = process.name().to_string_lossy().contains("claude-sessions")
+            || process.name().to_string_lossy().contains("tauri-temp");
+
+        if is_claude && !is_our_app {
             let cwd = process.cwd().map(|p| p.to_path_buf());
 
             processes.push(ClaudeProcess {
