@@ -351,12 +351,12 @@ fn find_active_session(project_dir: &PathBuf, project_path: &str, process: &Clau
 }
 
 /// Returns sort priority for status (lower = higher priority in list)
-/// Waiting sessions appear first, then active (thinking/processing), then idle
+/// Active sessions (thinking/processing) appear first, then waiting, then idle
 fn status_sort_priority(status: &SessionStatus) -> u8 {
     match status {
-        SessionStatus::Waiting => 0,    // Needs attention - show first
-        SessionStatus::Thinking => 1,   // Active - Claude is working
-        SessionStatus::Processing => 1, // Active - tool is running
+        SessionStatus::Thinking => 0,   // Active - Claude is working - show first
+        SessionStatus::Processing => 0, // Active - tool is running - show first
+        SessionStatus::Waiting => 1,    // Needs attention - show second
         SessionStatus::Idle => 2,       // Inactive - show last
     }
 }

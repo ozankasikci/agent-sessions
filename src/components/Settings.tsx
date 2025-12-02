@@ -1,5 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 interface SettingsProps {
   isOpen: boolean;
@@ -108,79 +117,65 @@ export function Settings({ isOpen, onClose }: SettingsProps) {
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div
-        className="bg-[#1a1a1a] rounded-xl border border-white/10 p-6 w-80 shadow-2xl"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-semibold text-white">Settings</h2>
-          <button
-            onClick={onClose}
-            className="text-white/40 hover:text-white/80 transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Settings</DialogTitle>
+          <DialogDescription>
+            Configure your Claude Sessions preferences
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-white/60 mb-2">
+        <div className="space-y-4 py-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">
               Global Hotkey
             </label>
             <div
-              className={`p-3 rounded-lg border text-center cursor-pointer transition-all ${
+              className={`flex items-center justify-center h-12 rounded-lg border cursor-pointer transition-all ${
                 isRecording
-                  ? 'border-purple-500 bg-purple-500/10 text-purple-300'
-                  : 'border-white/10 bg-white/5 text-white/80 hover:border-white/20'
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-secondary/50 text-foreground hover:border-primary/50'
               }`}
               onClick={() => setIsRecording(true)}
             >
-              {isRecording ? (
-                recordedKeys.length > 0 ? recordedKeys.join(' + ') : 'Press keys...'
-              ) : (
-                hotkey || 'Click to set hotkey'
-              )}
+              <span className="text-sm font-medium">
+                {isRecording ? (
+                  recordedKeys.length > 0 ? recordedKeys.join(' + ') : 'Press keys...'
+                ) : (
+                  hotkey || 'Click to set hotkey'
+                )}
+              </span>
             </div>
-            <p className="text-xs text-white/30 mt-2">
+            <p className="text-xs text-muted-foreground">
               Click and press your desired key combination
             </p>
           </div>
 
           {error && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+            <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm">
               {error}
             </div>
           )}
 
           {saved && (
-            <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm">
+            <div className="p-3 rounded-lg bg-status-processing/10 border border-status-processing/20 text-status-processing text-sm">
               Hotkey saved!
             </div>
           )}
-
-          <div className="flex gap-2 pt-2">
-            <button
-              onClick={handleClear}
-              className="flex-1 px-4 py-2 rounded-lg border border-white/10 text-white/60 hover:bg-white/5 transition-colors text-sm"
-            >
-              Clear
-            </button>
-            <button
-              onClick={handleSave}
-              className="flex-1 px-4 py-2 rounded-lg bg-white/10 text-white hover:bg-white/20 transition-colors text-sm font-medium"
-            >
-              Save
-            </button>
-          </div>
         </div>
-      </div>
-    </div>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={handleClear}>
+            Clear
+          </Button>
+          <Button onClick={handleSave}>
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
