@@ -61,25 +61,40 @@ fn focus_iterm_by_tty(tty: &str) -> Result<(), String> {
 }
 
 fn focus_terminal_app_by_tty(tty: &str) -> Result<(), String> {
+    // Check if Terminal is running first
+    let check_script = r#"
+        tell application "System Events"
+            return exists process "Terminal"
+        end tell
+    "#;
+
+    let check_output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(check_script)
+        .output()
+        .map_err(|e| format!("Failed to check Terminal: {}", e))?;
+
+    let is_running = String::from_utf8_lossy(&check_output.stdout).trim() == "true";
+    if !is_running {
+        return Err("Terminal is not running".to_string());
+    }
+
     let script = format!(r#"
         tell application "Terminal"
             activate
-            set targetFound to false
             repeat with w in windows
                 repeat with t in tabs of w
                     try
                         if tty of t contains "{}" then
                             set selected of t to true
                             set index of w to 1
-                            set targetFound to true
-                            exit repeat
+                            return "found"
                         end if
                     end try
-                    if targetFound then exit repeat
                 end repeat
-                if targetFound then exit repeat
             end repeat
         end tell
+        return "not found"
     "#, tty);
 
     execute_applescript(&script)
@@ -93,7 +108,13 @@ fn execute_applescript(script: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to execute AppleScript: {}", e))?;
 
     if output.status.success() {
-        Ok(())
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        // Check if script returned "found" - otherwise consider it a failure
+        if stdout == "not found" {
+            Err("Tab not found".to_string())
+        } else {
+            Ok(())
+        }
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         Err(format!("AppleScript error: {}", stderr))
