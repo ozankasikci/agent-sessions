@@ -16,6 +16,8 @@ A macOS desktop app to monitor all running Claude Code sessions.
 - Global hotkey to toggle visibility (configurable)
 - Click to focus on a specific session's terminal
 
+> **Note:** Currently supports macOS only with iTerm2 terminal. Support for other terminals coming soon.
+
 ## Installation
 
 ### Homebrew (recommended)
