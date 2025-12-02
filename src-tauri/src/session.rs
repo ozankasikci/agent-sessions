@@ -26,6 +26,7 @@ pub struct Session {
 pub enum SessionStatus {
     Waiting,
     Processing,
+    Thinking,
     Idle,
 }
 
@@ -346,14 +347,13 @@ fn determine_status(
 ) -> SessionStatus {
     // Determine status based on the last message in the conversation:
     // - If last message is from assistant with tool_use -> Processing (tool is being executed)
-    // - If last message is from user with tool_result -> Processing (Claude will continue after tool)
     // - If last message is from assistant with only text -> Waiting (Claude finished, waiting for user)
-    // - If last message is from user without tool_result -> Processing (user just sent input)
+    // - If last message is from user -> Thinking (Claude is generating a response)
 
     match last_msg_type {
         Some("assistant") => {
             if has_tool_use {
-                // Assistant sent a tool_use, waiting for tool execution
+                // Assistant sent a tool_use, tool is executing
                 SessionStatus::Processing
             } else {
                 // Assistant sent a text response, waiting for user input
@@ -361,9 +361,8 @@ fn determine_status(
             }
         }
         Some("user") => {
-            // User message - could be tool_result or actual user input
-            // Either way, Claude should be processing or about to process
-            SessionStatus::Processing
+            // User sent input (or tool_result), Claude is thinking/generating response
+            SessionStatus::Thinking
         }
         _ => SessionStatus::Idle,
     }

@@ -12,6 +12,12 @@ const statusConfig = {
     borderColor: 'border-amber-400/20',
     label: 'Waiting for input',
   },
+  thinking: {
+    color: 'bg-purple-400',
+    bgColor: 'bg-purple-400/10',
+    borderColor: 'border-purple-400/20',
+    label: 'Thinking...',
+  },
   processing: {
     color: 'bg-emerald-400',
     bgColor: 'bg-emerald-400/10',
