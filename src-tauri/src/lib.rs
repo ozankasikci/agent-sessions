@@ -1,16 +1,27 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod process;
+mod session;
+
 use tauri::{
     Manager,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_positioner::{Position, WindowExt};
 
+use session::{get_sessions, SessionsResponse};
+
+#[tauri::command]
+fn get_all_sessions() -> SessionsResponse {
+    get_sessions()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_positioner::init())
+        .invoke_handler(tauri::generate_handler![get_all_sessions])
         .setup(|app| {
             // Create tray icon
             let _tray = TrayIconBuilder::new()
