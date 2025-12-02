@@ -9,12 +9,15 @@ use tauri::{
     tray::TrayIconBuilder,
     menu::{MenuBuilder, MenuItemBuilder},
 };
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use std::sync::Mutex;
 
 use session::{get_sessions, SessionsResponse};
 
 // Store tray icon ID for updates
 static TRAY_ID: Mutex<Option<String>> = Mutex::new(None);
+// Store current shortcut for unregistration
+static CURRENT_SHORTCUT: Mutex<Option<Shortcut>> = Mutex::new(None);
 
 #[tauri::command]
 fn get_all_sessions() -> SessionsResponse {
@@ -44,11 +47,49 @@ fn update_tray_title(app: tauri::AppHandle, total: usize, waiting: usize) -> Res
     Ok(())
 }
 
+#[tauri::command]
+fn register_shortcut(app: tauri::AppHandle, shortcut: String) -> Result<(), String> {
+    // Unregister any existing shortcut first
+    if let Some(old_shortcut) = CURRENT_SHORTCUT.lock().unwrap().take() {
+        let _ = app.global_shortcut().unregister(old_shortcut);
+    }
+
+    // Parse the shortcut string
+    let parsed_shortcut: Shortcut = shortcut.parse()
+        .map_err(|e| format!("Invalid shortcut format: {}", e))?;
+
+    // Register the new shortcut
+    app.global_shortcut()
+        .on_shortcut(parsed_shortcut.clone(), move |app, _shortcut, _event| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        })
+        .map_err(|e| format!("Failed to register shortcut: {}", e))?;
+
+    // Store the shortcut for later unregistration
+    *CURRENT_SHORTCUT.lock().unwrap() = Some(parsed_shortcut);
+
+    Ok(())
+}
+
+#[tauri::command]
+fn unregister_shortcut(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(shortcut) = CURRENT_SHORTCUT.lock().unwrap().take() {
+        app.global_shortcut()
+            .unregister(shortcut)
+            .map_err(|e| format!("Failed to unregister shortcut: {}", e))?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![get_all_sessions, focus_session, update_tray_title])
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![get_all_sessions, focus_session, update_tray_title, register_shortcut, unregister_shortcut])
         .setup(|app| {
             // Create menu for tray
             let show_item = MenuItemBuilder::with_id("show", "Show Window")
