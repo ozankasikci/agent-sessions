@@ -184,9 +184,18 @@ pub fn get_sessions() -> SessionsResponse {
         }
     }
 
-    // Sort by most recent activity first
+    // Sort by status priority first, then by most recent activity within same priority
+    // Priority: Waiting (needs attention) > Thinking/Processing (active) > Idle
+    // Within same priority, sort by most recent activity
     sessions.sort_by(|a, b| {
-        b.last_activity_at.cmp(&a.last_activity_at)
+        let priority_a = status_sort_priority(&a.status);
+        let priority_b = status_sort_priority(&b.status);
+
+        if priority_a != priority_b {
+            priority_a.cmp(&priority_b)
+        } else {
+            b.last_activity_at.cmp(&a.last_activity_at)
+        }
     });
 
     let waiting_count = sessions.iter()
@@ -339,6 +348,17 @@ fn find_active_session(project_dir: &PathBuf, project_path: &str, process: &Clau
         pid: process.pid,
         cpu_usage: process.cpu_usage,
     })
+}
+
+/// Returns sort priority for status (lower = higher priority in list)
+/// Waiting sessions appear first, then active (thinking/processing), then idle
+fn status_sort_priority(status: &SessionStatus) -> u8 {
+    match status {
+        SessionStatus::Waiting => 0,    // Needs attention - show first
+        SessionStatus::Thinking => 1,   // Active - Claude is working
+        SessionStatus::Processing => 1, // Active - tool is running
+        SessionStatus::Idle => 2,       // Inactive - show last
+    }
 }
 
 fn determine_status(
