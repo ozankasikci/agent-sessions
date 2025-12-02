@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Claude Sessions",
+  "productName": "Agent Sessions",
   "version": "0.1.0",
   "identifier": "com.claude-sessions-viewer",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Claude Sessions",
+        "title": "Agent Sessions",
         "width": 1100,
         "height": 700,
         "minWidth": 700,

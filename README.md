@@ -1,4 +1,4 @@
-# Claude Sessions Viewer
+# Agent Sessions
 
 A macOS desktop app to monitor all running Claude Code sessions.
 

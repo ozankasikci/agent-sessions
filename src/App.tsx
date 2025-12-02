@@ -28,7 +28,7 @@ function App() {
         className="h-14 flex items-center justify-between px-6 border-b border-border bg-card/50 backdrop-blur-sm"
       >
         <div data-tauri-drag-region className="flex items-center gap-4 pl-16">
-          <h1 data-tauri-drag-region className="text-lg font-semibold text-foreground">Claude Sessions</h1>
+          <h1 data-tauri-drag-region className="text-lg font-semibold text-foreground">Agent Sessions</h1>
           {totalCount > 0 && (
             <div data-tauri-drag-region className="flex items-center gap-2">
               <Badge data-tauri-drag-region variant="secondary" className="font-medium pointer-events-none">
