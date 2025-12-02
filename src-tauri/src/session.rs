@@ -44,6 +44,8 @@ struct JsonlMessage {
     #[serde(rename = "gitBranch")]
     git_branch: Option<String>,
     timestamp: Option<String>,
+    #[serde(rename = "type")]
+    msg_type: Option<String>,
     message: Option<MessageContent>,
 }
 
@@ -51,6 +53,34 @@ struct JsonlMessage {
 struct MessageContent {
     role: Option<String>,
     content: Option<serde_json::Value>,
+}
+
+/// Check if message content contains a tool_use block
+fn has_tool_use(content: &serde_json::Value) -> bool {
+    if let serde_json::Value::Array(arr) = content {
+        arr.iter().any(|item| {
+            item.get("type")
+                .and_then(|t| t.as_str())
+                .map(|t| t == "tool_use")
+                .unwrap_or(false)
+        })
+    } else {
+        false
+    }
+}
+
+/// Check if message content contains a tool_result block
+fn has_tool_result(content: &serde_json::Value) -> bool {
+    if let serde_json::Value::Array(arr) = content {
+        arr.iter().any(|item| {
+            item.get("type")
+                .and_then(|t| t.as_str())
+                .map(|t| t == "tool_result")
+                .unwrap_or(false)
+        })
+    } else {
+        false
+    }
 }
 
 /// Convert a directory name like "-Users-ozan-Projects-ai-image-dashboard" back to a path
@@ -204,6 +234,9 @@ fn find_active_session(project_dir: &PathBuf, project_path: &str, process: &Clau
     let mut last_timestamp = None;
     let mut last_message = None;
     let mut last_role = None;
+    let mut last_msg_type = None;
+    let mut last_has_tool_use = false;
+    let mut last_has_tool_result = false;
 
     // Read last N lines for efficiency
     let lines: Vec<_> = reader.lines().flatten().collect();
@@ -220,21 +253,30 @@ fn find_active_session(project_dir: &PathBuf, project_path: &str, process: &Clau
             if last_timestamp.is_none() {
                 last_timestamp = msg.timestamp;
             }
+            if last_msg_type.is_none() {
+                last_msg_type = msg.msg_type;
+            }
 
             if last_message.is_none() {
-                if let Some(content) = msg.message {
-                    last_role = content.role;
-                    last_message = content.content.and_then(|c| {
-                        match c {
-                            serde_json::Value::String(s) => Some(s),
+                if let Some(content) = &msg.message {
+                    last_role = content.role.clone();
+                    if let Some(c) = &content.content {
+                        // Check for tool_use or tool_result in the most recent message
+                        if !last_has_tool_use && !last_has_tool_result {
+                            last_has_tool_use = has_tool_use(c);
+                            last_has_tool_result = has_tool_result(c);
+                        }
+
+                        last_message = match c {
+                            serde_json::Value::String(s) => Some(s.clone()),
                             serde_json::Value::Array(arr) => {
                                 arr.iter().find_map(|v| {
                                     v.get("text").and_then(|t| t.as_str()).map(String::from)
                                 })
                             }
                             _ => None,
-                        }
-                    });
+                        };
+                    }
                 }
             }
 
@@ -246,8 +288,13 @@ fn find_active_session(project_dir: &PathBuf, project_path: &str, process: &Clau
 
     let session_id = session_id?;
 
-    // Determine status
-    let status = determine_status(process.cpu_usage, last_role.as_deref(), &last_timestamp);
+    // Determine status based on message type, content, and CPU usage
+    let status = determine_status(
+        process.cpu_usage,
+        last_msg_type.as_deref(),
+        last_has_tool_use,
+        last_has_tool_result,
+    );
 
     // Extract project name from path
     let project_name = project_path
@@ -280,16 +327,38 @@ fn find_active_session(project_dir: &PathBuf, project_path: &str, process: &Clau
     })
 }
 
-fn determine_status(cpu_usage: f32, last_role: Option<&str>, _last_timestamp: &Option<String>) -> SessionStatus {
+fn determine_status(
+    cpu_usage: f32,
+    last_msg_type: Option<&str>,
+    has_tool_use: bool,
+    _has_tool_result: bool,
+) -> SessionStatus {
     // High CPU means actively processing
     if cpu_usage > 5.0 {
         return SessionStatus::Processing;
     }
 
-    // Check last message role
-    match last_role {
-        Some("assistant") => SessionStatus::Waiting,
-        Some("user") => SessionStatus::Processing,
+    // Determine status based on the last message in the conversation:
+    // - If last message is from assistant with tool_use -> Processing (tool is being executed)
+    // - If last message is from user with tool_result -> Processing (Claude will continue after tool)
+    // - If last message is from assistant with only text -> Waiting (Claude finished, waiting for user)
+    // - If last message is from user without tool_result -> Processing (user just sent input)
+
+    match last_msg_type {
+        Some("assistant") => {
+            if has_tool_use {
+                // Assistant sent a tool_use, waiting for tool execution
+                SessionStatus::Processing
+            } else {
+                // Assistant sent a text response, waiting for user input
+                SessionStatus::Waiting
+            }
+        }
+        Some("user") => {
+            // User message - could be tool_result or actual user input
+            // Either way, Claude should be processing or about to process
+            SessionStatus::Processing
+        }
         _ => SessionStatus::Idle,
     }
 }
