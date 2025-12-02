@@ -183,14 +183,9 @@ pub fn get_sessions() -> SessionsResponse {
         }
     }
 
-    // Sort: waiting first, then processing, then idle
+    // Sort by most recent activity first
     sessions.sort_by(|a, b| {
-        let status_order = |s: &SessionStatus| match s {
-            SessionStatus::Waiting => 0,
-            SessionStatus::Processing => 1,
-            SessionStatus::Idle => 2,
-        };
-        status_order(&a.status).cmp(&status_order(&b.status))
+        b.last_activity_at.cmp(&a.last_activity_at)
     });
 
     let waiting_count = sessions.iter()
