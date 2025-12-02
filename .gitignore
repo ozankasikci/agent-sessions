@@ -27,3 +27,6 @@ install.sh
 # Release artifacts
 *.dmg
 release/
+
+# Environment variables
+.env
