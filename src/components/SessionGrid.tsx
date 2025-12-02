@@ -11,7 +11,7 @@ export function SessionGrid({ sessions, onSessionClick }: SessionGridProps) {
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       {sessions.map((session) => (
         <SessionCard
-          key={session.id}
+          key={`${session.id}-${session.pid}`}
           session={session}
           onClick={() => onSessionClick(session)}
         />

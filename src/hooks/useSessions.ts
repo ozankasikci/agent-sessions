@@ -22,7 +22,8 @@ export function useSessions() {
   const fetchSessions = useCallback(async () => {
     try {
       const response = await invoke<SessionsResponse>('get_all_sessions');
-      setSessions(response.sessions);
+      // Always create a new array reference to ensure React detects changes
+      setSessions([...response.sessions]);
       setTotalCount(response.totalCount);
       setWaitingCount(response.waitingCount);
       setError(null);
