@@ -18,6 +18,8 @@ use session::{get_sessions, SessionsResponse};
 static TRAY_ID: Mutex<Option<String>> = Mutex::new(None);
 // Store current shortcut for unregistration
 static CURRENT_SHORTCUT: Mutex<Option<Shortcut>> = Mutex::new(None);
+// Track if window is shown (for toggle behavior)
+static WINDOW_SHOWN: Mutex<bool> = Mutex::new(true);
 
 #[tauri::command]
 fn get_all_sessions() -> SessionsResponse {
@@ -60,19 +62,24 @@ fn register_shortcut(app: tauri::AppHandle, shortcut: String) -> Result<(), Stri
 
     // Register the new shortcut - toggle window visibility
     app.global_shortcut()
-        .on_shortcut(parsed_shortcut.clone(), move |app, _shortcut, _event| {
-            if let Some(window) = app.get_webview_window("main") {
-                // Check if window is visible and focused
-                let is_visible = window.is_visible().unwrap_or(false);
-                let is_focused = window.is_focused().unwrap_or(false);
+        .on_shortcut(parsed_shortcut.clone(), move |app, _shortcut, event| {
+            // Only handle key press, not release
+            if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                return;
+            }
 
-                if is_visible && is_focused {
+            if let Some(window) = app.get_webview_window("main") {
+                let mut shown = WINDOW_SHOWN.lock().unwrap();
+
+                if *shown {
                     // Hide the window to return to previous app
                     let _ = window.hide();
+                    *shown = false;
                 } else {
                     // Show and focus the window
                     let _ = window.show();
                     let _ = window.set_focus();
+                    *shown = true;
                 }
             }
         })
