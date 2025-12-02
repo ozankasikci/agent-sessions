@@ -231,14 +231,13 @@ fn find_active_session(project_dir: &PathBuf, project_path: &str, process: &Clau
     let mut last_role = None;
     let mut last_msg_type = None;
     let mut last_has_tool_use = false;
-    let mut _last_has_tool_result = false;
     let mut found_status_info = false;
 
     // Read last N lines for efficiency
     let lines: Vec<_> = reader.lines().flatten().collect();
-    let recent_lines = lines.iter().rev().take(100);
+    let recent_lines: Vec<_> = lines.iter().rev().take(100).collect();
 
-    for line in recent_lines {
+    for line in &recent_lines {
         if let Ok(msg) = serde_json::from_str::<JsonlMessage>(line) {
             if session_id.is_none() {
                 session_id = msg.session_id;
@@ -251,11 +250,9 @@ fn find_active_session(project_dir: &PathBuf, project_path: &str, process: &Clau
             }
 
             // For status detection, we need to find the most recent message that has CONTENT
-            // (not just a type). The JSONL has streaming entries, so we need the final one.
             if !found_status_info {
                 if let Some(content) = &msg.message {
                     if let Some(c) = &content.content {
-                        // Check if this content has actual data (not empty array)
                         let has_content = match c {
                             serde_json::Value::String(s) => !s.is_empty(),
                             serde_json::Value::Array(arr) => !arr.is_empty(),
@@ -263,45 +260,43 @@ fn find_active_session(project_dir: &PathBuf, project_path: &str, process: &Clau
                         };
 
                         if has_content {
-                            // Capture type and content info from the SAME message
                             last_msg_type = msg.msg_type.clone();
                             last_role = content.role.clone();
                             last_has_tool_use = has_tool_use(c);
-                            _last_has_tool_result = has_tool_result(c);
                             found_status_info = true;
-
-                            if last_message.is_none() {
-                                last_message = match c {
-                                    serde_json::Value::String(s) => Some(s.clone()),
-                                    serde_json::Value::Array(arr) => {
-                                        // First try to find text content
-                                        let text = arr.iter().find_map(|v| {
-                                            v.get("text").and_then(|t| t.as_str()).map(String::from)
-                                        });
-                                        // If no text, show tool name being used
-                                        text.or_else(|| {
-                                            arr.iter().find_map(|v| {
-                                                if v.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
-                                                    v.get("name").and_then(|n| n.as_str())
-                                                        .map(|name| format!("Using {}...", name))
-                                                } else if v.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
-                                                    Some("Processing tool result...".to_string())
-                                                } else {
-                                                    None
-                                                }
-                                            })
-                                        })
-                                    }
-                                    _ => None,
-                                };
-                            }
                         }
                     }
                 }
             }
 
-            if session_id.is_some() && found_status_info && last_message.is_some() {
+            if session_id.is_some() && found_status_info {
                 break;
+            }
+        }
+    }
+
+    // Now find the last meaningful text message (keep looking even after finding status)
+    for line in &recent_lines {
+        if let Ok(msg) = serde_json::from_str::<JsonlMessage>(line) {
+            if let Some(content) = &msg.message {
+                if let Some(c) = &content.content {
+                    let text = match c {
+                        serde_json::Value::String(s) if !s.is_empty() => Some(s.clone()),
+                        serde_json::Value::Array(arr) => {
+                            arr.iter().find_map(|v| {
+                                v.get("text").and_then(|t| t.as_str())
+                                    .filter(|s| !s.is_empty())
+                                    .map(String::from)
+                            })
+                        }
+                        _ => None,
+                    };
+
+                    if text.is_some() {
+                        last_message = text;
+                        break;
+                    }
+                }
             }
         }
     }
