@@ -11,12 +11,12 @@ pub struct ClaudeProcess {
 }
 
 pub fn find_claude_processes() -> Vec<ClaudeProcess> {
-    // Only refresh process info we actually need - much faster than refresh_all()
+    // Refresh process info - use Always to detect newly spawned processes
     let mut system = System::new_with_specifics(
         RefreshKind::new().with_processes(
             ProcessRefreshKind::new()
-                .with_cmd(sysinfo::UpdateKind::OnlyIfNotSet)
-                .with_cwd(sysinfo::UpdateKind::OnlyIfNotSet)
+                .with_cmd(sysinfo::UpdateKind::Always)
+                .with_cwd(sysinfo::UpdateKind::Always)
                 .with_cpu()
                 .with_memory()
         )
