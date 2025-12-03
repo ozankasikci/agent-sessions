@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 pub mod commands;
+pub mod logging;
 pub mod process;
 pub mod session;
 pub mod terminal;
@@ -22,6 +23,9 @@ static TRAY_ID: Mutex<Option<String>> = Mutex::new(None);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Initialize logging (only active in debug builds)
+    let _ = logging::init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())

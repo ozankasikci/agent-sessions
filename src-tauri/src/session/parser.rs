@@ -1,3 +1,4 @@
+use log::{debug, info, trace, warn};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
@@ -92,7 +93,11 @@ pub fn convert_dir_name_to_path(dir_name: &str) -> String {
 pub fn get_sessions() -> SessionsResponse {
     use crate::process::find_claude_processes;
 
+    info!("=== Getting all sessions ===");
+
     let claude_processes = find_claude_processes();
+    debug!("Found {} Claude processes total", claude_processes.len());
+
     let mut sessions = Vec::new();
 
     // Build a map of cwd -> list of processes (multiple sessions can run in same folder)
@@ -100,7 +105,10 @@ pub fn get_sessions() -> SessionsResponse {
     for process in &claude_processes {
         if let Some(cwd) = &process.cwd {
             let cwd_str = cwd.to_string_lossy().to_string();
+            debug!("Mapping process pid={} to cwd={}", process.pid, cwd_str);
             cwd_to_processes.entry(cwd_str).or_default().push(process);
+        } else {
+            warn!("Process pid={} has no cwd, skipping", process.pid);
         }
     }
 
@@ -109,7 +117,10 @@ pub fn get_sessions() -> SessionsResponse {
         .map(|h| h.join(".claude").join("projects"))
         .unwrap_or_default();
 
+    debug!("Claude projects directory: {:?}", claude_dir);
+
     if !claude_dir.exists() {
+        warn!("Claude projects directory does not exist: {:?}", claude_dir);
         return SessionsResponse {
             sessions: vec![],
             total_count: 0,
@@ -131,21 +142,36 @@ pub fn get_sessions() -> SessionsResponse {
                 .unwrap_or("");
 
             let project_path = convert_dir_name_to_path(dir_name);
+            trace!("Checking project: {} -> {}", dir_name, project_path);
 
             // Check if this project has active Claude processes
             let processes = match cwd_to_processes.get(&project_path) {
-                Some(p) => p,
-                None => continue, // Skip projects without active processes
+                Some(p) => {
+                    debug!("Project {} has {} active processes", project_path, p.len());
+                    p
+                },
+                None => {
+                    trace!("Project {} has no active processes, skipping", project_path);
+                    continue;
+                }
             };
 
             // Find all JSONL files that were recently modified (within last 30 seconds)
             // These are likely the active sessions
             let jsonl_files = get_recently_active_jsonl_files(&path, processes.len());
+            debug!("Found {} JSONL files for project {}", jsonl_files.len(), project_path);
 
             // Match processes to JSONL files
             for (index, process) in processes.iter().enumerate() {
+                debug!("Matching process pid={} to JSONL file index {}", process.pid, index);
                 if let Some(session) = find_session_for_process(&jsonl_files, &project_path, process, index) {
+                    info!(
+                        "Session created: id={}, project={}, status={:?}, pid={}",
+                        session.id, session.project_name, session.status, session.pid
+                    );
                     sessions.push(session);
+                } else {
+                    warn!("Failed to create session for process pid={} in project {}", process.pid, project_path);
                 }
             }
         }
@@ -169,6 +195,11 @@ pub fn get_sessions() -> SessionsResponse {
         .filter(|s| matches!(s.status, SessionStatus::Waiting))
         .count();
     let total_count = sessions.len();
+
+    info!(
+        "=== Session scan complete: {} total, {} waiting ===",
+        total_count, waiting_count
+    );
 
     SessionsResponse {
         sessions,
@@ -238,16 +269,25 @@ fn find_session_for_process(jsonl_files: &[PathBuf], project_path: &str, process
 
 /// Parse a JSONL session file and create a Session struct
 pub fn parse_session_file(jsonl_path: &PathBuf, project_path: &str, process: &ClaudeProcess) -> Option<Session> {
-    use std::time::{Duration, SystemTime};
+    use std::time::SystemTime;
+
+    debug!("Parsing JSONL file: {:?}", jsonl_path);
 
     // Check if the file was modified very recently (indicates active processing)
-    let file_recently_modified = jsonl_path
+    let file_age_secs = jsonl_path
         .metadata()
         .and_then(|m| m.modified())
         .ok()
         .and_then(|modified| SystemTime::now().duration_since(modified).ok())
-        .map(|d| d < Duration::from_secs(3))
-        .unwrap_or(false);
+        .map(|d| d.as_secs_f32());
+
+    let file_recently_modified = file_age_secs.map(|age| age < 3.0).unwrap_or(false);
+
+    debug!(
+        "File age: {:.1}s, recently_modified: {}",
+        file_age_secs.unwrap_or(-1.0),
+        file_recently_modified
+    );
 
     // Parse the JSONL file to get session info
     let file = File::open(jsonl_path).ok()?;
@@ -267,6 +307,8 @@ pub fn parse_session_file(jsonl_path: &PathBuf, project_path: &str, process: &Cl
     // Read last N lines for efficiency
     let lines: Vec<_> = reader.lines().flatten().collect();
     let recent_lines: Vec<_> = lines.iter().rev().take(100).collect();
+
+    trace!("File has {} total lines, checking last {}", lines.len(), recent_lines.len());
 
     for line in &recent_lines {
         if let Ok(msg) = serde_json::from_str::<JsonlMessage>(line) {
@@ -297,6 +339,11 @@ pub fn parse_session_file(jsonl_path: &PathBuf, project_path: &str, process: &Cl
                             last_has_tool_result = has_tool_result(c);
                             last_is_local_command = is_local_slash_command(c);
                             found_status_info = true;
+
+                            debug!(
+                                "Found status info: type={:?}, role={:?}, has_tool_use={}, has_tool_result={}, is_local_cmd={}",
+                                last_msg_type, last_role, last_has_tool_use, last_has_tool_result, last_is_local_command
+                            );
                         }
                     }
                 }
@@ -343,6 +390,11 @@ pub fn parse_session_file(jsonl_path: &PathBuf, project_path: &str, process: &Cl
         last_has_tool_result,
         last_is_local_command,
         file_recently_modified,
+    );
+
+    debug!(
+        "Status determination: type={:?}, tool_use={}, tool_result={}, local_cmd={}, recent={} -> {:?}",
+        last_msg_type, last_has_tool_use, last_has_tool_result, last_is_local_command, file_recently_modified, status
     );
 
     // Extract project name from path
