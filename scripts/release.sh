@@ -158,21 +158,24 @@ main() {
         archs=("$arch_filter")
     fi
 
-    # Map arch names to Rust targets
-    declare -A targets
-    targets["aarch64"]="aarch64-apple-darwin"
-    targets["x64"]="x86_64-apple-darwin"
+    # Helper function to map arch to target
+    get_target() {
+        case "$1" in
+            aarch64) echo "aarch64-apple-darwin" ;;
+            x64) echo "x86_64-apple-darwin" ;;
+        esac
+    }
 
     # Build
     if [ "$skip_build" = false ]; then
         for arch in "${archs[@]}"; do
-            build_arch "$arch" "${targets[$arch]}"
+            build_arch "$arch" "$(get_target "$arch")"
         done
     fi
 
     # Create DMGs
     for arch in "${archs[@]}"; do
-        create_dmg "$arch" "${targets[$arch]}"
+        create_dmg "$arch" "$(get_target "$arch")"
     done
 
     # Sign DMGs
