@@ -208,14 +208,9 @@ pub fn get_sessions() -> SessionsResponse {
     }
 }
 
-/// Get JSONL files that are likely active sessions
-/// Takes the expected count of active processes and returns the most recently modified files
-fn get_recently_active_jsonl_files(project_dir: &PathBuf, expected_count: usize) -> Vec<PathBuf> {
-    use std::time::{Duration, SystemTime};
-
-    let now = SystemTime::now();
-    let recent_threshold = Duration::from_secs(60); // Consider files modified in last 60 seconds as potentially active
-
+/// Get JSONL files for a project, sorted by modification time (newest first)
+/// Returns all files so that find_session_for_process can check for subagent activity
+fn get_recently_active_jsonl_files(project_dir: &PathBuf, _expected_count: usize) -> Vec<PathBuf> {
     let mut jsonl_files: Vec<_> = fs::read_dir(project_dir)
         .into_iter()
         .flatten()
@@ -235,36 +230,74 @@ fn get_recently_active_jsonl_files(project_dir: &PathBuf, expected_count: usize)
     // Sort by modification time (newest first)
     jsonl_files.sort_by(|a, b| b.1.cmp(&a.1));
 
-    // First, try to get recently modified files (within threshold)
-    let recent_files: Vec<PathBuf> = jsonl_files
-        .iter()
-        .filter(|(_, modified)| {
-            now.duration_since(*modified)
-                .map(|d| d < recent_threshold)
-                .unwrap_or(false)
-        })
-        .map(|(path, _)| path.clone())
-        .collect();
-
-    // If we have enough recent files, use those
-    if recent_files.len() >= expected_count {
-        return recent_files.into_iter().take(expected_count).collect();
-    }
-
-    // Otherwise, just take the N most recently modified files
     jsonl_files
         .into_iter()
-        .take(expected_count)
         .map(|(path, _)| path)
         .collect()
 }
 
 /// Find a session for a specific process from available JSONL files
-/// Takes the index to pick different files for different processes
+/// Checks all recent files and uses the most "active" status found
 fn find_session_for_process(jsonl_files: &[PathBuf], project_path: &str, process: &ClaudeProcess, index: usize) -> Option<Session> {
-    // Get the JSONL file at the given index (they're sorted by most recent first)
-    let jsonl_path = jsonl_files.get(index)?;
-    parse_session_file(jsonl_path, project_path, process)
+    use std::time::{Duration, SystemTime};
+
+    // Get the primary JSONL file at the given index
+    let primary_jsonl = jsonl_files.get(index)?;
+
+    // Parse the primary file first
+    let mut session = parse_session_file(primary_jsonl, project_path, process)?;
+
+    // Check if any other recent files show more active status
+    // This handles subagent scenarios where main session file stops updating
+    let now = SystemTime::now();
+    let active_threshold = Duration::from_secs(10); // Check files modified in last 10 seconds
+
+    for jsonl_path in jsonl_files {
+        if jsonl_path == primary_jsonl {
+            continue;
+        }
+
+        // Only check recently modified files
+        let is_recent = jsonl_path
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .map(|d| d < active_threshold)
+            .unwrap_or(false);
+
+        if !is_recent {
+            continue;
+        }
+
+        // Parse this file and check its status
+        if let Some(other_session) = parse_session_file(jsonl_path, project_path, process) {
+            // If this file shows a more active status, use it
+            let current_priority = status_sort_priority(&session.status);
+            let other_priority = status_sort_priority(&other_session.status);
+
+            if other_priority < current_priority {
+                debug!(
+                    "Found more active status in {:?}: {:?} -> {:?}",
+                    jsonl_path, session.status, other_session.status
+                );
+                session.status = other_session.status;
+                // Keep the original session's other fields (id, last_message, etc.)
+            }
+        }
+    }
+
+    // Additional check: if CPU usage is high, the process is likely working
+    // Override Waiting status if CPU > 5%
+    if matches!(session.status, SessionStatus::Waiting) && process.cpu_usage > 5.0 {
+        debug!(
+            "Process has high CPU ({:.1}%), overriding Waiting -> Processing",
+            process.cpu_usage
+        );
+        session.status = SessionStatus::Processing;
+    }
+
+    Some(session)
 }
 
 /// Parse a JSONL session file and create a Session struct
