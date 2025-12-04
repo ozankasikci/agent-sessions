@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { formatTimeAgo, truncatePath, statusConfig } from '@/lib/formatters';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openUrl, revealItemInDir } from '@tauri-apps/plugin-opener';
 
 interface SessionCardProps {
   session: Session;
@@ -139,6 +139,10 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
     }
   };
 
+  const handleOpenDirectory = async () => {
+    await revealItemInDir(session.projectPath);
+  };
+
   return (
     <>
       <Card
@@ -229,6 +233,22 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
                       />
                     </svg>
                     {customUrl ? 'Edit URL' : 'Set URL'}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleOpenDirectory}>
+                    <svg
+                      className="w-4 h-4 mr-2"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                      />
+                    </svg>
+                    Open Directory
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
