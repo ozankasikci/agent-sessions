@@ -201,7 +201,7 @@ pub fn get_sessions() -> SessionsResponse {
             // Match processes to JSONL files
             for (index, process) in processes.iter().enumerate() {
                 debug!("Matching process pid={} to JSONL file index {}", process.pid, index);
-                if let Some(session) = find_session_for_process(&jsonl_files, &project_path, process, index) {
+                if let Some(session) = find_session_for_process(&jsonl_files, &path, &project_path, process, index) {
                     info!(
                         "Session created: id={}, project={}, status={:?}, pid={}",
                         session.id, session.project_name, session.status, session.pid
@@ -245,17 +245,76 @@ pub fn get_sessions() -> SessionsResponse {
     }
 }
 
+/// Check if a JSONL file is a subagent file (named agent-*.jsonl)
+fn is_subagent_file(path: &PathBuf) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|name| name.starts_with("agent-") && name.ends_with(".jsonl"))
+        .unwrap_or(false)
+}
+
+/// Extract sessionId from a subagent JSONL file by reading the first few lines
+fn get_subagent_session_id(path: &PathBuf) -> Option<String> {
+    let file = File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
+    // Check first 5 lines for sessionId
+    for line in reader.lines().take(5).flatten() {
+        if let Ok(msg) = serde_json::from_str::<JsonlMessage>(&line) {
+            if let Some(session_id) = msg.session_id {
+                return Some(session_id);
+            }
+        }
+    }
+    None
+}
+
+/// Count active subagents for a given parent session
+fn count_active_subagents(project_dir: &PathBuf, parent_session_id: &str) -> usize {
+    use std::time::{Duration, SystemTime};
+
+    let active_threshold = Duration::from_secs(30);
+    let now = SystemTime::now();
+
+    let count = fs::read_dir(project_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| is_subagent_file(&e.path()))
+        .filter(|e| {
+            // Check if file was recently modified
+            e.metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .map(|d| d < active_threshold)
+                .unwrap_or(false)
+        })
+        .filter(|e| {
+            // Check if sessionId matches parent
+            get_subagent_session_id(&e.path())
+                .map(|id| id == parent_session_id)
+                .unwrap_or(false)
+        })
+        .count();
+
+    trace!("Found {} active subagents for session {}", count, parent_session_id);
+    count
+}
+
 /// Get JSONL files for a project, sorted by modification time (newest first)
-/// Returns all files so that find_session_for_process can check for subagent activity
+/// Excludes subagent files (agent-*.jsonl) as they are counted separately
 fn get_recently_active_jsonl_files(project_dir: &PathBuf, _expected_count: usize) -> Vec<PathBuf> {
     let mut jsonl_files: Vec<_> = fs::read_dir(project_dir)
         .into_iter()
         .flatten()
         .flatten()
         .filter(|e| {
-            e.path().extension()
+            let path = e.path();
+            path.extension()
                 .map(|ext| ext == "jsonl")
                 .unwrap_or(false)
+                && !is_subagent_file(&path)
         })
         .filter_map(|e| {
             let path = e.path();
@@ -275,7 +334,13 @@ fn get_recently_active_jsonl_files(project_dir: &PathBuf, _expected_count: usize
 
 /// Find a session for a specific process from available JSONL files
 /// Checks all recent files and uses the most "active" status found
-fn find_session_for_process(jsonl_files: &[PathBuf], project_path: &str, process: &ClaudeProcess, index: usize) -> Option<Session> {
+fn find_session_for_process(
+    jsonl_files: &[PathBuf],
+    project_dir: &PathBuf,
+    project_path: &str,
+    process: &ClaudeProcess,
+    index: usize,
+) -> Option<Session> {
     use std::time::{Duration, SystemTime};
 
     // Get the primary JSONL file at the given index
@@ -283,6 +348,9 @@ fn find_session_for_process(jsonl_files: &[PathBuf], project_path: &str, process
 
     // Parse the primary file first
     let mut session = parse_session_file(primary_jsonl, project_path, process)?;
+
+    // Count active subagents for this session
+    session.active_subagent_count = count_active_subagents(project_dir, &session.id);
 
     // Check if any other recent files show more active status
     // This handles subagent scenarios where main session file stops updating
@@ -502,5 +570,6 @@ pub fn parse_session_file(jsonl_path: &PathBuf, project_path: &str, process: &Cl
         last_activity_at: last_timestamp.unwrap_or_else(|| "Unknown".to_string()),
         pid: process.pid,
         cpu_usage: process.cpu_usage,
+        active_subagent_count: 0, // Set by find_session_for_process
     })
 }

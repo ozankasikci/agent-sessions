@@ -15,6 +15,7 @@ pub struct Session {
     pub last_activity_at: String,
     pub pid: u32,
     pub cpu_usage: f32,
+    pub active_subagent_count: usize,
 }
 
 /// Status of a Claude Code session

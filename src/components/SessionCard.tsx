@@ -277,9 +277,16 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
 
           {/* Footer: Status Badge + Time */}
           <div className="flex items-center justify-between pt-3 mt-3 border-t border-border">
-            <Badge variant="outline" className={config.badgeClassName}>
-              {config.label}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className={config.badgeClassName}>
+                {config.label}
+              </Badge>
+              {session.activeSubagentCount > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  [+{session.activeSubagentCount}]
+                </span>
+              )}
+            </div>
             <span className="text-xs text-muted-foreground">
               {formatTimeAgo(session.lastActivityAt)}
             </span>

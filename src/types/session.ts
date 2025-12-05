@@ -12,6 +12,7 @@ export interface Session {
   lastActivityAt: string;
   pid: number;
   cpuUsage: number;
+  activeSubagentCount: number;
 }
 
 export interface SessionsResponse {
