@@ -18,7 +18,7 @@ A macOS desktop app to monitor all running Claude Code sessions.
 - Custom session names (rename via kebab menu)
 - Quick access URL for each session (e.g., dev server links)
 
-> **Note:** Currently supports macOS only with iTerm2 terminal. Support for other terminals coming soon.
+> **Note:** Currently supports macOS only with iTerm2 and Terminal. Support for other terminals coming soon.
 
 ## Installation
 
