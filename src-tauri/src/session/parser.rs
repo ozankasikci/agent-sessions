@@ -4,10 +4,32 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 
 use crate::process::ClaudeProcess;
 use super::model::{Session, SessionStatus, SessionsResponse, JsonlMessage};
 use super::status::{determine_status, has_tool_use, has_tool_result, is_local_slash_command, is_interrupted_request, status_sort_priority};
+
+/// Track previous status for each session to detect transitions
+static PREVIOUS_STATUS: Lazy<Mutex<HashMap<String, SessionStatus>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// Extract a preview of content for debugging
+fn get_content_preview(content: &serde_json::Value) -> String {
+    match content {
+        serde_json::Value::String(s) => {
+            let preview: String = s.chars().take(100).collect();
+            format!("text: \"{}{}\"", preview, if s.len() > 100 { "..." } else { "" })
+        }
+        serde_json::Value::Array(arr) => {
+            let types: Vec<String> = arr.iter()
+                .filter_map(|v| v.get("type").and_then(|t| t.as_str()).map(String::from))
+                .collect();
+            format!("blocks: [{}]", types.join(", "))
+        }
+        _ => "unknown".to_string(),
+    }
+}
 
 /// Get GitHub URL from a project's git remote origin
 fn get_github_url(project_path: &str) -> Option<String> {
@@ -202,9 +224,27 @@ pub fn get_sessions() -> SessionsResponse {
             for (index, process) in processes.iter().enumerate() {
                 debug!("Matching process pid={} to JSONL file index {}", process.pid, index);
                 if let Some(session) = find_session_for_process(&jsonl_files, &path, &project_path, process, index) {
+                    // Track status transitions
+                    let mut prev_status_map = PREVIOUS_STATUS.lock().unwrap();
+                    let prev_status = prev_status_map.get(&session.id).cloned();
+
+                    // Log status transition if it changed
+                    if let Some(prev) = &prev_status {
+                        if *prev != session.status {
+                            warn!(
+                                "STATUS TRANSITION: project={}, {:?} -> {:?}, cpu={:.1}%, file_age=?, last_msg_role={:?}",
+                                session.project_name, prev, session.status, session.cpu_usage, session.last_message_role
+                            );
+                        }
+                    }
+
+                    // Update stored status
+                    prev_status_map.insert(session.id.clone(), session.status.clone());
+                    drop(prev_status_map);
+
                     info!(
-                        "Session created: id={}, project={}, status={:?}, pid={}",
-                        session.id, session.project_name, session.status, session.pid
+                        "Session created: id={}, project={}, status={:?}, pid={}, cpu={:.1}%",
+                        session.id, session.project_name, session.status, session.pid, session.cpu_usage
                     );
                     sessions.push(session);
                 } else {
@@ -480,9 +520,11 @@ pub fn parse_session_file(jsonl_path: &PathBuf, project_path: &str, process: &Cl
                             last_is_interrupted = is_interrupted_request(c);
                             found_status_info = true;
 
+                            // Enhanced logging with content preview
+                            let content_preview = get_content_preview(c);
                             debug!(
-                                "Found status info: type={:?}, role={:?}, has_tool_use={}, has_tool_result={}, is_local_cmd={}, is_interrupted={}",
-                                last_msg_type, last_role, last_has_tool_use, last_has_tool_result, last_is_local_command, last_is_interrupted
+                                "Found status info: type={:?}, role={:?}, has_tool_use={}, has_tool_result={}, is_local_cmd={}, is_interrupted={}, content={}",
+                                last_msg_type, last_role, last_has_tool_use, last_has_tool_result, last_is_local_command, last_is_interrupted, content_preview
                             );
                         }
                     }

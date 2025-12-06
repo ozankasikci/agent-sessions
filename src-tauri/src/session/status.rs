@@ -110,17 +110,18 @@ pub fn determine_status(
     is_interrupted: bool,
     file_recently_modified: bool,
 ) -> SessionStatus {
-    // Key insight: Once an assistant text message (without tool_use) is written, Claude is done
-    // and waiting for user input, regardless of file modification time
-
     match last_msg_type {
         Some("assistant") => {
             if has_tool_use {
                 // Assistant sent a tool_use, tool is executing
                 SessionStatus::Processing
+            } else if file_recently_modified {
+                // Assistant sent text but file was just modified - Claude might still be
+                // streaming or about to send another message. Treat as active.
+                SessionStatus::Processing
             } else {
-                // Assistant sent a text response - waiting for user input
-                // Once Claude sends text without tool_use, it's done and waiting
+                // Assistant sent a text response and file hasn't been modified recently
+                // Claude is done and waiting for user input
                 SessionStatus::Waiting
             }
         }
