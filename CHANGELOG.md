@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.17] - 2025-12-07
+
+### Fixed
+- Session detection for paths with dashes in folder names (worktrees, subfolders)
+
 ## [0.1.16] - 2025-12-06
 
 ### Changed
