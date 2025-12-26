@@ -4,18 +4,18 @@ import { Session, SessionsResponse } from '../types/session';
 
 const POLL_INTERVAL = 2000; // 2 seconds
 
-// Get priority for status (lower = higher priority, shown first)
-function getStatusPriority(status: string): number {
+// Get ordering priority for card stability (only distinguishes active vs idle)
+// This prevents card reordering when status flips between thinking/processing/waiting
+function getOrderingPriority(status: string): number {
   switch (status) {
     case 'thinking':
     case 'processing':
-      return 0; // Active - show first
     case 'waiting':
-      return 1; // Needs attention - show second
+      return 0; // All active states - same ordering priority
     case 'idle':
-      return 2; // Inactive - show last
+      return 1; // Only idle causes reordering
     default:
-      return 3;
+      return 2;
   }
 }
 
@@ -29,15 +29,16 @@ function mergeWithStableOrder(existing: Session[], incoming: Session[]): Session
   const existingOrder = new Map<string, number>();
   existing.forEach((s, idx) => existingOrder.set(s.id, idx));
 
-  // Create a map of existing priorities
+  // Create a map of existing ordering priorities (coarse: active vs idle)
   const existingPriority = new Map<string, number>();
-  existing.forEach(s => existingPriority.set(s.id, getStatusPriority(s.status)));
+  existing.forEach(s => existingPriority.set(s.id, getOrderingPriority(s.status)));
 
-  // Check if any session changed priority tier
+  // Check if any session changed ordering tier (only active <-> idle triggers reorder)
+  // Status changes within active states (thinking/processing/waiting) don't cause reordering
   let priorityChanged = false;
   for (const session of incoming) {
     const oldPriority = existingPriority.get(session.id);
-    const newPriority = getStatusPriority(session.status);
+    const newPriority = getOrderingPriority(session.status);
     if (oldPriority !== undefined && oldPriority !== newPriority) {
       priorityChanged = true;
       break;
