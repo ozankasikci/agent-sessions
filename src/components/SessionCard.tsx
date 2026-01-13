@@ -22,6 +22,27 @@ import { formatTimeAgo, truncatePath, statusConfig } from '@/lib/formatters';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { invoke } from '@tauri-apps/api/core';
 
+// Agent type icons
+const ClaudeIcon = () => (
+  <svg viewBox="0 0 24 24" className="w-4 h-4 fill-orange-400">
+    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15h-2v-6h2v6zm4 0h-2v-6h2v6zm-2-8c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z"/>
+  </svg>
+);
+
+const OpenCodeIcon = () => (
+  <svg viewBox="0 0 24 24" className="w-4 h-4 fill-cyan-400">
+    <path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/>
+  </svg>
+);
+
+const AgentBadge = ({ type }: { type: 'claude' | 'opencode' }) => {
+  return (
+    <div className="absolute top-2 right-2 opacity-60">
+      {type === 'claude' ? <ClaudeIcon /> : <OpenCodeIcon />}
+    </div>
+  );
+};
+
 interface SessionCardProps {
   session: Session;
   onClick: () => void;
@@ -158,9 +179,10 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
   return (
     <>
       <Card
-        className={`group cursor-pointer transition-all duration-200 hover:shadow-lg py-0 gap-0 h-full flex flex-col ${config.cardBg} ${config.cardBorder} hover:border-primary/30`}
+        className={`relative group cursor-pointer transition-all duration-200 hover:shadow-lg py-0 gap-0 h-full flex flex-col ${config.cardBg} ${config.cardBorder} hover:border-primary/30`}
         onClick={onClick}
       >
+        <AgentBadge type={session.agentType} />
         <CardContent className="p-4 flex flex-col flex-1">
           {/* Header: Project name + Menu + Status indicator */}
           <div className="flex items-start justify-between gap-2 mb-3">
