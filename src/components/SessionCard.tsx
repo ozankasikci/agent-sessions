@@ -37,10 +37,13 @@ const OpenCodeIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-// Agent icon with status coloring
+// Agent icon - Claude always orange (brand color), OpenCode uses status color
 const AgentStatusIcon = ({ type, statusColor }: { type: 'claude' | 'opencode', statusColor: string }) => {
-  const iconClass = `w-4 h-4 ${statusColor}`;
-  return type === 'claude' ? <ClaudeIcon className={iconClass} /> : <OpenCodeIcon className={iconClass} />;
+  if (type === 'claude') {
+    // Claude brand color: coral/orange #D77655
+    return <ClaudeIcon className="w-4 h-4 fill-[#D77655]" />;
+  }
+  return <OpenCodeIcon className={`w-4 h-4 ${statusColor}`} />;
 };
 
 interface SessionCardProps {
