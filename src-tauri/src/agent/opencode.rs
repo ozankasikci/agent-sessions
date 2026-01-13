@@ -70,16 +70,33 @@ struct OpenCodeMessage {
     time: OpenCodeTime,
 }
 
+// Reuse System instance to get accurate CPU readings (requires previous measurement)
+static OPENCODE_SYSTEM: std::sync::Mutex<Option<sysinfo::System>> = std::sync::Mutex::new(None);
+
 /// Find running opencode processes
 fn find_opencode_processes() -> Vec<AgentProcess> {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
 
-    let mut system = System::new();
+    let mut system_guard = OPENCODE_SYSTEM.lock().unwrap();
+
+    // Initialize system if not already done
+    let system = system_guard.get_or_insert_with(|| {
+        log::debug!("Initializing new System instance for OpenCode");
+        System::new_with_specifics(
+            RefreshKind::new().with_processes(
+                ProcessRefreshKind::new()
+                    .with_cwd(UpdateKind::Always)
+                    .with_cpu()
+            )
+        )
+    });
+
+    // Refresh process list
     system.refresh_processes_specifics(
         ProcessesToUpdate::All,
         ProcessRefreshKind::new()
-            .with_cpu()
-            .with_cwd(UpdateKind::OnlyIfNotSet),
+            .with_cwd(UpdateKind::Always)
+            .with_cpu(),
     );
 
     let mut processes = Vec::new();
@@ -88,10 +105,18 @@ fn find_opencode_processes() -> Vec<AgentProcess> {
         let name = process.name().to_string_lossy().to_lowercase();
 
         if name == "opencode" {
+            let cpu = process.cpu_usage();
+            let cwd = process.cwd().map(|p| p.to_path_buf());
+            log::debug!(
+                "OpenCode process: pid={}, cpu={:.1}%, cwd={:?}",
+                pid.as_u32(),
+                cpu,
+                cwd
+            );
             processes.push(AgentProcess {
                 pid: pid.as_u32(),
-                cpu_usage: process.cpu_usage(),
-                cwd: process.cwd().map(|p| p.to_path_buf()),
+                cpu_usage: cpu,
+                cwd,
             });
         }
     }
