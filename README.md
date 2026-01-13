@@ -5,13 +5,18 @@
 [![macOS](https://img.shields.io/badge/macOS-Monterey%2B-black)](https://github.com/ozankasikci/agent-sessions/releases)
 [![Homebrew](https://img.shields.io/badge/Homebrew-available-orange)](https://github.com/ozankasikci/homebrew-tap)
 
-A macOS desktop app to monitor all running Claude Code sessions.
+A macOS desktop app to monitor your AI coding agents in real-time.
 
 ![Demo](demo/claude-sessions-demo.gif)
 
+## Supported Agents
+
+- **Claude Code** - Anthropic's official CLI for Claude
+- **OpenCode** - Open-source AI coding assistant
+
 ## Features
 
-- View all active Claude Code sessions in one place
+- View all active coding agent sessions in one place
 - Real-time status detection (Thinking, Processing, Waiting, Idle)
 - Global hotkey to toggle visibility (default: `Ctrl+Space`, configurable)
 - Click to focus on a specific session's terminal
