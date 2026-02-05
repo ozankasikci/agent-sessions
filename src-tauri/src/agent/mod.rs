@@ -1,4 +1,5 @@
 pub mod claude;
+pub mod codex;
 pub mod opencode;
 
 use crate::session::{Session, SessionsResponse, AgentType};
@@ -34,6 +35,7 @@ pub fn get_all_sessions() -> SessionsResponse {
     let detectors: Vec<Box<dyn AgentDetector>> = vec![
         Box::new(claude::ClaudeDetector),
         Box::new(opencode::OpenCodeDetector),
+        Box::new(codex::CodexDetector),
     ];
 
     let mut all_sessions = Vec::new();
