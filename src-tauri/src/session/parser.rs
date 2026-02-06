@@ -9,7 +9,7 @@ use once_cell::sync::Lazy;
 
 use crate::agent::AgentProcess;
 use super::model::{AgentType, Session, SessionStatus, SessionsResponse, JsonlMessage};
-use super::status::{determine_status, has_tool_use, has_tool_result, is_local_slash_command, is_interrupted_request, status_sort_priority};
+use super::status::{determine_status, has_tool_use, has_tool_result, is_local_slash_command, is_interrupted_request};
 
 /// Track previous status for each session to detect transitions
 static PREVIOUS_STATUS: Lazy<Mutex<HashMap<String, SessionStatus>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -41,6 +41,26 @@ fn get_content_preview(content: &serde_json::Value) -> String {
         }
         _ => "unknown".to_string(),
     }
+}
+
+/// Extract the cwd (project path) from the first few lines of a JSONL file.
+/// Returns the first valid cwd found, which should be the project root.
+fn extract_cwd_from_jsonl(jsonl_path: &PathBuf) -> Option<String> {
+    let file = File::open(jsonl_path).ok()?;
+    let reader = BufReader::new(file);
+
+    // Check first 20 lines for a cwd field
+    for line in reader.lines().take(20).flatten() {
+        if let Ok(msg) = serde_json::from_str::<JsonlMessage>(&line) {
+            if let Some(cwd) = msg.cwd {
+                // Claude Code always writes absolute paths
+                if cwd.starts_with('/') {
+                    return Some(cwd);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Get GitHub URL from a project's git remote origin
@@ -235,48 +255,48 @@ pub fn get_sessions_internal(processes: &[AgentProcess], agent_type: AgentType) 
                 continue;
             }
 
-            // Convert directory name back to path
             let dir_name = path.file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("");
 
-            let project_path = convert_dir_name_to_path(dir_name);
-            debug!("Checking project: {} -> {}", dir_name, project_path);
+            // Get all recent JSONL files and extract cwd from each.
+            // Multiple real paths can collide into the same encoded directory
+            // (e.g., agent-sessions and agent/sessions both encode to -...-agent-sessions)
+            // so we need to match each file's cwd to the process's cwd individually.
+            let jsonl_files = get_recently_active_jsonl_files(&path, 100);
+            if jsonl_files.is_empty() {
+                trace!("Project {} has no recent JSONL files, skipping", dir_name);
+                continue;
+            }
 
-            // Check if this project has active processes
-            // First try exact match
-            let matching_processes = if let Some(p) = cwd_to_processes.get(&project_path) {
-                debug!("Project {} has {} active processes (exact match)", project_path, p.len());
-                p
-            } else {
-                // Try to find a matching cwd by converting each cwd to a dir name and comparing
-                let matching_cwd = cwd_to_processes.keys().find(|cwd| {
-                    let cwd_as_dir = convert_path_to_dir_name(cwd);
-                    cwd_as_dir == dir_name
-                });
+            // Build a map of cwd -> list of JSONL files with that cwd
+            let mut cwd_to_files: HashMap<String, Vec<PathBuf>> = HashMap::new();
+            for jsonl_file in &jsonl_files {
+                let file_cwd = extract_cwd_from_jsonl(jsonl_file)
+                    .unwrap_or_else(|| {
+                        // Fallback to decoded directory name if file has no cwd
+                        convert_dir_name_to_path(dir_name)
+                    });
+                cwd_to_files.entry(file_cwd).or_default().push(jsonl_file.clone());
+            }
 
-                match matching_cwd {
-                    Some(cwd) => {
-                        debug!("Project {} matched via reverse lookup to cwd {}", dir_name, cwd);
-                        cwd_to_processes.get(cwd).unwrap()
-                    }
-                    None => {
-                        trace!("Project {} has no active processes, skipping", project_path);
-                        continue;
-                    }
-                }
-            };
+            debug!("Project {} has {} distinct cwds across {} files",
+                   dir_name, cwd_to_files.len(), jsonl_files.len());
 
-            // Find all JSONL files that were recently modified (within last 30 seconds)
-            // These are likely the active sessions
-            let jsonl_files = get_recently_active_jsonl_files(&path, matching_processes.len());
-            debug!("Found {} JSONL files for project {}", jsonl_files.len(), project_path);
+            // For each unique cwd, find matching processes and create sessions
+            for (project_path, files_for_cwd) in &cwd_to_files {
+                let matching_processes = match cwd_to_processes.get(project_path) {
+                    Some(procs) => procs,
+                    None => continue,
+                };
 
-            // Match processes to JSONL files
-            let assigned_count = matching_processes.len();
-            for (index, process) in matching_processes.iter().enumerate() {
-                debug!("Matching process pid={} to JSONL file index {}", process.pid, index);
-                if let Some(session) = find_session_for_process(&jsonl_files, &path, &project_path, process, index, agent_type.clone(), assigned_count) {
+                debug!("  cwd {} -> {} processes, {} files",
+                       project_path, matching_processes.len(), files_for_cwd.len());
+
+                // Match processes to JSONL files
+                for (index, process) in matching_processes.iter().enumerate() {
+                    debug!("Matching process pid={} to JSONL file index {}", process.pid, index);
+                    if let Some(session) = find_session_for_process(files_for_cwd, &path, project_path, process, index, agent_type.clone()) {
                     // Track status transitions
                     let mut prev_status_map = PREVIOUS_STATUS.lock().unwrap();
                     let prev_status = prev_status_map.get(&session.id).cloned();
@@ -303,6 +323,7 @@ pub fn get_sessions_internal(processes: &[AgentProcess], agent_type: AgentType) 
                 } else {
                     warn!("Failed to create session for process pid={} in project {}", process.pid, project_path);
                 }
+            }
             }
         }
     }
@@ -403,7 +424,6 @@ fn get_recently_active_jsonl_files(project_dir: &PathBuf, _expected_count: usize
 }
 
 /// Find a session for a specific process from available JSONL files
-/// Checks unassigned recent files and uses the most "active" status found
 fn find_session_for_process(
     jsonl_files: &[PathBuf],
     project_dir: &PathBuf,
@@ -411,64 +431,12 @@ fn find_session_for_process(
     process: &AgentProcess,
     index: usize,
     agent_type: AgentType,
-    assigned_count: usize,
 ) -> Option<Session> {
-    use std::time::{Duration, SystemTime};
-
-    // Get the primary JSONL file at the given index
-    let primary_jsonl = jsonl_files.get(index)?;
-
-    // Parse the primary file first
-    let mut session = parse_session_file(primary_jsonl, project_path, process.pid, process.cpu_usage, agent_type.clone())?;
+    let jsonl_path = jsonl_files.get(index)?;
+    let mut session = parse_session_file(jsonl_path, project_path, process.pid, process.cpu_usage, agent_type)?;
 
     // Count active subagents for this session
     session.active_subagent_count = count_active_subagents(project_dir, &session.id);
-
-    // Check if any unassigned recent files show more active status
-    // Only check files NOT already assigned to another process (index >= assigned_count)
-    // Files at indices 0..assigned_count are each assigned to a specific process
-    let now = SystemTime::now();
-    let active_threshold = Duration::from_secs(10); // Check files modified in last 10 seconds
-
-    for (file_idx, jsonl_path) in jsonl_files.iter().enumerate() {
-        if jsonl_path == primary_jsonl {
-            continue;
-        }
-
-        // Skip files assigned to other processes to prevent cross-contamination
-        if file_idx < assigned_count {
-            continue;
-        }
-
-        // Only check recently modified files
-        let is_recent = jsonl_path
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|modified| now.duration_since(modified).ok())
-            .map(|d| d < active_threshold)
-            .unwrap_or(false);
-
-        if !is_recent {
-            continue;
-        }
-
-        // Parse this file and check its status
-        if let Some(other_session) = parse_session_file(jsonl_path, project_path, process.pid, process.cpu_usage, agent_type.clone()) {
-            // If this file shows a more active status, use it
-            let current_priority = status_sort_priority(&session.status);
-            let other_priority = status_sort_priority(&other_session.status);
-
-            if other_priority < current_priority {
-                debug!(
-                    "Found more active status in {:?}: {:?} -> {:?}",
-                    jsonl_path, session.status, other_session.status
-                );
-                session.status = other_session.status;
-                // Keep the original session's other fields (id, last_message, etc.)
-            }
-        }
-    }
 
     Some(session)
 }
