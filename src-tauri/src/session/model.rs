@@ -54,6 +54,7 @@ pub(crate) struct JsonlMessage {
     pub session_id: Option<String>,
     #[serde(rename = "gitBranch")]
     pub git_branch: Option<String>,
+    pub cwd: Option<String>,
     pub timestamp: Option<String>,
     #[serde(rename = "type")]
     pub msg_type: Option<String>,
