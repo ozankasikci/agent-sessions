@@ -14,6 +14,33 @@ pub fn has_tool_use(content: &serde_json::Value) -> bool {
     }
 }
 
+/// Check if all tool_use blocks in content are user-input tools (e.g., AskUserQuestion).
+/// These tools block on user input and should be treated as Waiting, not Processing.
+/// Returns false if any tool_use has no name or an unrecognized name.
+pub fn is_waiting_for_user_input(content: &serde_json::Value) -> bool {
+    let user_input_tools = ["AskUserQuestion"];
+
+    if let serde_json::Value::Array(arr) = content {
+        let tool_use_blocks: Vec<_> = arr.iter()
+            .filter(|item| {
+                item.get("type")
+                    .and_then(|t| t.as_str())
+                    .map(|t| t == "tool_use")
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        !tool_use_blocks.is_empty() && tool_use_blocks.iter().all(|item| {
+            item.get("name")
+                .and_then(|n| n.as_str())
+                .map(|name| user_input_tools.contains(&name))
+                .unwrap_or(false) // unnamed tool_use -> not a user-input tool
+        })
+    } else {
+        false
+    }
+}
+
 /// Check if message content contains a tool_result block
 pub fn has_tool_result(content: &serde_json::Value) -> bool {
     if let serde_json::Value::Array(arr) = content {
@@ -108,11 +135,15 @@ pub fn determine_status(
     _has_tool_result: bool,
     is_local_command: bool,
     is_interrupted: bool,
+    is_user_input_tool: bool,
     file_recently_modified: bool,
 ) -> SessionStatus {
     match last_msg_type {
         Some("assistant") => {
-            if has_tool_use {
+            if has_tool_use && is_user_input_tool {
+                // Tool like AskUserQuestion - waiting for user input
+                SessionStatus::Waiting
+            } else if has_tool_use {
                 // Tool is executing - could take seconds or minutes
                 SessionStatus::Processing
             } else if file_recently_modified {
