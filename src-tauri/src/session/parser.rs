@@ -64,7 +64,7 @@ fn extract_cwd_from_jsonl(jsonl_path: &PathBuf) -> Option<String> {
 }
 
 /// Get GitHub URL from a project's git remote origin
-fn get_github_url(project_path: &str) -> Option<String> {
+pub fn get_github_url(project_path: &str) -> Option<String> {
     let output = Command::new("git")
         .args(["remote", "get-url", "origin"])
         .current_dir(project_path)

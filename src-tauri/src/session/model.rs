@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum AgentType {
     Claude,
     OpenCode,
+    Codex,
 }
 
 /// Represents a Claude Code session

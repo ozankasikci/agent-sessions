@@ -101,7 +101,7 @@ function App() {
             </div>
             <h2 className="text-lg font-medium text-foreground mb-2">No active sessions</h2>
             <p className="text-muted-foreground text-sm max-w-xs">
-              Start a Claude session in your terminal to see it here
+              Start an agent session in your terminal to see it here
             </p>
           </div>
         ) : (
