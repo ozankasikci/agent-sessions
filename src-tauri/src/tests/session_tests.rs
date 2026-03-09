@@ -1,7 +1,7 @@
 use crate::session::{
     AgentType, SessionStatus, parse_session_file, convert_dir_name_to_path, convert_path_to_dir_name,
     determine_status, status_sort_priority, has_tool_use, has_tool_result, is_local_slash_command,
-    is_interrupted_request, cleanup_stale_status_entries, get_sessions_internal
+    is_interrupted_request, is_waiting_for_user_input, cleanup_stale_status_entries, get_sessions_internal
 };
 use crate::agent::AgentProcess;
 use serde_json::json;
@@ -218,6 +218,46 @@ fn test_is_local_slash_command() {
 }
 
 #[test]
+fn test_is_waiting_for_user_input() {
+    // Single AskUserQuestion -> Waiting
+    assert!(is_waiting_for_user_input(&json!([
+        {"type": "tool_use", "id": "1", "name": "AskUserQuestion"}
+    ])));
+
+    // Multiple AskUserQuestion -> Waiting
+    assert!(is_waiting_for_user_input(&json!([
+        {"type": "tool_use", "id": "1", "name": "AskUserQuestion"},
+        {"type": "tool_use", "id": "2", "name": "AskUserQuestion"}
+    ])));
+
+    // Mixed: AskUserQuestion + Bash -> Processing (not all are user-input)
+    assert!(!is_waiting_for_user_input(&json!([
+        {"type": "tool_use", "id": "1", "name": "AskUserQuestion"},
+        {"type": "tool_use", "id": "2", "name": "Bash"}
+    ])));
+
+    // Unnamed tool_use + AskUserQuestion -> Processing (unnamed is not safe)
+    assert!(!is_waiting_for_user_input(&json!([
+        {"type": "tool_use", "id": "1", "name": "AskUserQuestion"},
+        {"type": "tool_use", "id": "2"}
+    ])));
+
+    // Non-user-input tool only
+    assert!(!is_waiting_for_user_input(&json!([
+        {"type": "tool_use", "id": "1", "name": "Read"}
+    ])));
+
+    // No tool_use at all
+    assert!(!is_waiting_for_user_input(&json!([
+        {"type": "text", "text": "hello"}
+    ])));
+
+    // Non-array content
+    assert!(!is_waiting_for_user_input(&json!("string")));
+    assert!(!is_waiting_for_user_input(&json!(null)));
+}
+
+#[test]
 fn test_determine_status_assistant_with_tool_use() {
     // Assistant message with tool_use -> always Processing (tool could run for minutes)
     let status = determine_status(
@@ -226,6 +266,7 @@ fn test_determine_status_assistant_with_tool_use() {
         false, // has_tool_result
         false, // is_local_command
         false, // is_interrupted
+        false, // is_user_input_tool
         false, // file_recently_modified
     );
     assert!(matches!(status, SessionStatus::Processing));
@@ -237,9 +278,22 @@ fn test_determine_status_assistant_with_tool_use() {
         false,
         false,
         false,
+        false,
         true,
     );
     assert!(matches!(status, SessionStatus::Processing));
+
+    // AskUserQuestion tool_use -> Waiting (waiting for user input)
+    let status = determine_status(
+        Some("assistant"),
+        true,  // has_tool_use
+        false,
+        false,
+        false,
+        true,  // is_user_input_tool
+        false,
+    );
+    assert!(matches!(status, SessionStatus::Waiting));
 }
 
 #[test]
@@ -252,12 +306,14 @@ fn test_determine_status_assistant_text_only() {
         false,
         false,
         false,
+        false,
     );
     assert!(matches!(status, SessionStatus::Waiting));
 
     // With recent file activity, text-only assistant = Processing (still streaming/compacting)
     let status = determine_status(
         Some("assistant"),
+        false,
         false,
         false,
         false,
@@ -277,12 +333,14 @@ fn test_determine_status_user_message() {
         false, // not a local command
         false, // is_interrupted
         false,
+        false,
     );
     assert!(matches!(status, SessionStatus::Thinking));
 
     // User message with recent file activity -> Thinking
     let status = determine_status(
         Some("user"),
+        false,
         false,
         false,
         false,
@@ -299,6 +357,7 @@ fn test_determine_status_user_message() {
         true, // is_local_command
         false,
         false,
+        false,
     );
     assert!(matches!(status, SessionStatus::Waiting));
 
@@ -309,6 +368,7 @@ fn test_determine_status_user_message() {
         false,
         false,
         true, // is_interrupted
+        false,
         false,
     );
     assert!(matches!(status, SessionStatus::Waiting));
@@ -324,6 +384,7 @@ fn test_determine_status_user_with_tool_result() {
         false,
         false,
         false,
+        false,
     );
     assert!(matches!(status, SessionStatus::Thinking));
 
@@ -332,6 +393,7 @@ fn test_determine_status_user_with_tool_result() {
         Some("user"),
         false,
         true,
+        false,
         false,
         false,
         true,
@@ -348,6 +410,7 @@ fn test_determine_status_unknown_type() {
         false,
         false,
         false,
+        false,
         true,
     );
     assert!(matches!(status, SessionStatus::Processing));
@@ -355,6 +418,7 @@ fn test_determine_status_unknown_type() {
     // Unknown message type, file stale -> Waiting
     let status = determine_status(
         None,
+        false,
         false,
         false,
         false,

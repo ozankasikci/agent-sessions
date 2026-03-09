@@ -9,7 +9,7 @@ use once_cell::sync::Lazy;
 
 use crate::agent::AgentProcess;
 use super::model::{AgentType, Session, SessionStatus, SessionsResponse, JsonlMessage};
-use super::status::{determine_status, has_tool_use, has_tool_result, is_local_slash_command, is_interrupted_request};
+use super::status::{determine_status, has_tool_use, has_tool_result, is_local_slash_command, is_interrupted_request, is_waiting_for_user_input};
 
 /// Track previous status for each session to detect transitions
 static PREVIOUS_STATUS: Lazy<Mutex<HashMap<String, SessionStatus>>> = Lazy::new(|| Mutex::new(HashMap::new()));
@@ -483,6 +483,7 @@ pub fn parse_session_file(
     let mut last_has_tool_result = false;
     let mut last_is_local_command = false;
     let mut last_is_interrupted = false;
+    let mut last_is_user_input_tool = false;
     let mut found_status_info = false;
     let mut is_compacting = false;
 
@@ -537,13 +538,14 @@ pub fn parse_session_file(
                             last_has_tool_result = has_tool_result(c);
                             last_is_local_command = is_local_slash_command(c);
                             last_is_interrupted = is_interrupted_request(c);
+                            last_is_user_input_tool = is_waiting_for_user_input(c);
                             found_status_info = true;
 
                             // Enhanced logging with content preview
                             let content_preview = get_content_preview(c);
                             debug!(
-                                "Found status info: type={:?}, role={:?}, has_tool_use={}, has_tool_result={}, is_local_cmd={}, is_interrupted={}, content={}",
-                                last_msg_type, last_role, last_has_tool_use, last_has_tool_result, last_is_local_command, last_is_interrupted, content_preview
+                                "Found status info: type={:?}, role={:?}, has_tool_use={}, has_tool_result={}, is_local_cmd={}, is_interrupted={}, is_user_input={}, content={}",
+                                last_msg_type, last_role, last_has_tool_use, last_has_tool_result, last_is_local_command, last_is_interrupted, last_is_user_input_tool, content_preview
                             );
                         }
                     }
@@ -594,13 +596,14 @@ pub fn parse_session_file(
             last_has_tool_result,
             last_is_local_command,
             last_is_interrupted,
+            last_is_user_input_tool,
             file_recently_modified,
         )
     };
 
     debug!(
-        "Status determination: type={:?}, tool_use={}, tool_result={}, local_cmd={}, interrupted={}, recent={}, compacting={}, file_age={:.1}s -> {:?}",
-        last_msg_type, last_has_tool_use, last_has_tool_result, last_is_local_command, last_is_interrupted, file_recently_modified, is_compacting, file_age_secs.unwrap_or(-1.0), status
+        "Status determination: type={:?}, tool_use={}, tool_result={}, local_cmd={}, interrupted={}, user_input={}, recent={}, compacting={}, file_age={:.1}s -> {:?}",
+        last_msg_type, last_has_tool_use, last_has_tool_result, last_is_local_command, last_is_interrupted, last_is_user_input_tool, file_recently_modified, is_compacting, file_age_secs.unwrap_or(-1.0), status
     );
 
     // Extract project name from path
