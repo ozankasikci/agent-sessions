@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.27] - 2026-03-09
+
+### Fixed
+- Show sessions as "Waiting" when Claude is blocked on `AskUserQuestion` user input instead of "Processing"
+
 ## [0.1.26] - 2026-03-01
 
 ### Fixed
