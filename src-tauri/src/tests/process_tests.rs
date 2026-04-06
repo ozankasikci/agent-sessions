@@ -67,16 +67,7 @@ fn test_claude_process_serialization() {
 fn test_find_claude_processes_returns_vec() {
     // This test just ensures the function runs without panicking
     // In a real environment, it may or may not find Claude processes
-    let processes = find_claude_processes();
-    // Should return a Vec (possibly empty) - just verify we got a result
-    let _ = processes.len();
-}
-
-#[test]
-fn test_find_claude_processes_excludes_orphans() {
-    // Run process discovery and verify no orphaned processes are returned
-    // An orphaned process has its parent shell reparented to PID 1 (launchd)
-    let system = System::new_with_specifics(
+    let mut system = System::new_with_specifics(
         RefreshKind::new().with_processes(
             ProcessRefreshKind::new()
                 .with_cmd(sysinfo::UpdateKind::Always)
@@ -85,8 +76,42 @@ fn test_find_claude_processes_excludes_orphans() {
                 .with_memory()
         )
     );
+    system.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::All,
+        ProcessRefreshKind::new()
+            .with_cmd(sysinfo::UpdateKind::Always)
+            .with_cwd(sysinfo::UpdateKind::Always)
+            .with_cpu()
+            .with_memory()
+    );
+    let processes = find_claude_processes(&system);
+    // Should return a Vec (possibly empty) - just verify we got a result
+    let _ = processes.len();
+}
 
-    let processes = find_claude_processes();
+#[test]
+fn test_find_claude_processes_excludes_orphans() {
+    // Run process discovery and verify no orphaned processes are returned
+    // An orphaned process has its parent shell reparented to PID 1 (launchd)
+    let mut system = System::new_with_specifics(
+        RefreshKind::new().with_processes(
+            ProcessRefreshKind::new()
+                .with_cmd(sysinfo::UpdateKind::Always)
+                .with_cwd(sysinfo::UpdateKind::Always)
+                .with_cpu()
+                .with_memory()
+        )
+    );
+    system.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::All,
+        ProcessRefreshKind::new()
+            .with_cmd(sysinfo::UpdateKind::Always)
+            .with_cwd(sysinfo::UpdateKind::Always)
+            .with_cpu()
+            .with_memory()
+    );
+
+    let processes = find_claude_processes(&system);
 
     // Verify that every returned process is NOT orphaned
     for cp in &processes {

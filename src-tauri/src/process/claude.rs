@@ -1,8 +1,7 @@
 use log::{debug, trace, warn};
 use serde::{Deserialize, Serialize};
-use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+use sysinfo::System;
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 /// Represents a running Claude Code process
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -12,9 +11,6 @@ pub struct ClaudeProcess {
     pub cpu_usage: f32,
     pub memory: u64,
 }
-
-// Reuse System instance to avoid expensive re-initialization
-static SYSTEM: Mutex<Option<System>> = Mutex::new(None);
 
 /// Check if a process is orphaned by examining its parent chain.
 /// A process is considered orphaned if its parent shell has been reparented
@@ -49,40 +45,14 @@ pub fn is_orphaned_process(system: &System, process: &sysinfo::Process) -> bool 
     false
 }
 
-/// Find all running Claude Code processes on the system
+/// Find all running Claude Code processes using the shared system snapshot.
 /// Filters out sub-agent processes (whose parent is also a Claude process)
-/// and orphaned processes (whose terminal has been closed)
-pub fn find_claude_processes() -> Vec<ClaudeProcess> {
+/// and orphaned processes (whose terminal has been closed).
+pub fn find_claude_processes(system: &System) -> Vec<ClaudeProcess> {
     use std::collections::HashSet;
     use sysinfo::Pid;
 
     debug!("=== Starting process discovery ===");
-
-    let mut system_guard = SYSTEM.lock().unwrap();
-
-    // Initialize system if not already done
-    let system = system_guard.get_or_insert_with(|| {
-        debug!("Initializing new System instance");
-        System::new_with_specifics(
-            RefreshKind::new().with_processes(
-                ProcessRefreshKind::new()
-                    .with_cmd(sysinfo::UpdateKind::Always)
-                    .with_cwd(sysinfo::UpdateKind::Always)
-                    .with_cpu()
-                    .with_memory()
-            )
-        )
-    });
-
-    // Refresh process list with full details for new processes
-    system.refresh_processes_specifics(
-        sysinfo::ProcessesToUpdate::All,
-        ProcessRefreshKind::new()
-            .with_cmd(sysinfo::UpdateKind::Always)
-            .with_cwd(sysinfo::UpdateKind::Always)
-            .with_cpu()
-            .with_memory()
-    );
 
     let total_processes = system.processes().len();
     trace!("Total system processes: {}", total_processes);

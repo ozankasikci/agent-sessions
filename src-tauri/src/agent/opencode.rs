@@ -15,8 +15,8 @@ impl AgentDetector for OpenCodeDetector {
         AgentType::OpenCode
     }
 
-    fn find_processes(&self) -> Vec<AgentProcess> {
-        find_opencode_processes()
+    fn find_processes(&self, system: &sysinfo::System) -> Vec<AgentProcess> {
+        find_opencode_processes(system)
     }
 
     fn find_sessions(&self, processes: &[AgentProcess]) -> Vec<Session> {
@@ -78,35 +78,8 @@ struct OpenCodePart {
     text: Option<String>,
 }
 
-// Reuse System instance to get accurate CPU readings (requires previous measurement)
-static OPENCODE_SYSTEM: std::sync::Mutex<Option<sysinfo::System>> = std::sync::Mutex::new(None);
-
-/// Find running opencode processes
-fn find_opencode_processes() -> Vec<AgentProcess> {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind};
-
-    let mut system_guard = OPENCODE_SYSTEM.lock().unwrap();
-
-    // Initialize system if not already done
-    let system = system_guard.get_or_insert_with(|| {
-        log::debug!("Initializing new System instance for OpenCode");
-        System::new_with_specifics(
-            RefreshKind::new().with_processes(
-                ProcessRefreshKind::new()
-                    .with_cwd(UpdateKind::Always)
-                    .with_cpu()
-            )
-        )
-    });
-
-    // Refresh process list
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        ProcessRefreshKind::new()
-            .with_cwd(UpdateKind::Always)
-            .with_cpu(),
-    );
-
+/// Find running opencode processes using the shared system snapshot
+fn find_opencode_processes(system: &sysinfo::System) -> Vec<AgentProcess> {
     let mut processes = Vec::new();
 
     for (pid, process) in system.processes() {

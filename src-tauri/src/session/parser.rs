@@ -1,7 +1,7 @@
 use log::{debug, info, trace, warn};
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
@@ -13,6 +13,9 @@ use super::status::{determine_status, has_tool_use, has_tool_result, is_local_sl
 
 /// Track previous status for each session to detect transitions
 static PREVIOUS_STATUS: Lazy<Mutex<HashMap<String, SessionStatus>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// Cache git remote URLs by project path — remote URL never changes during app lifetime
+static GIT_URL_CACHE: Lazy<Mutex<HashMap<String, Option<String>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
 
 /// Clean up PREVIOUS_STATUS entries for sessions that no longer exist.
 /// Call this after all agent detectors have run to prevent unbounded memory growth.
@@ -63,8 +66,28 @@ fn extract_cwd_from_jsonl(jsonl_path: &PathBuf) -> Option<String> {
     None
 }
 
-/// Get GitHub URL from a project's git remote origin
+/// Get GitHub URL from a project's git remote origin (cached)
 fn get_github_url(project_path: &str) -> Option<String> {
+    // Check cache first — avoids spawning a git subprocess on every poll
+    {
+        let cache = GIT_URL_CACHE.lock().unwrap();
+        if let Some(cached) = cache.get(project_path) {
+            return cached.clone();
+        }
+    }
+
+    let result = get_github_url_uncached(project_path);
+
+    // Cache the result (including None) so we don't retry failed lookups
+    {
+        let mut cache = GIT_URL_CACHE.lock().unwrap();
+        cache.insert(project_path.to_string(), result.clone());
+    }
+
+    result
+}
+
+fn get_github_url_uncached(project_path: &str) -> Option<String> {
     let output = Command::new("git")
         .args(["remote", "get-url", "origin"])
         .current_dir(project_path)
@@ -225,10 +248,14 @@ pub fn get_sessions_internal(processes: &[AgentProcess], agent_type: AgentType) 
 
     // Build a map of cwd -> list of processes (multiple sessions can run in same folder)
     let mut cwd_to_processes: HashMap<String, Vec<&AgentProcess>> = HashMap::new();
+    // Pre-compute expected project directory names from process CWDs.
+    // This lets us skip scanning directories that can't match any running process.
+    let mut expected_dir_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for process in processes {
         if let Some(cwd) = &process.cwd {
             let cwd_str = cwd.to_string_lossy().to_string();
             debug!("Mapping process pid={} to cwd={}", process.pid, cwd_str);
+            expected_dir_names.insert(convert_path_to_dir_name(&cwd_str));
             cwd_to_processes.entry(cwd_str).or_default().push(process);
         } else {
             warn!("Process pid={} has no cwd, skipping", process.pid);
@@ -258,6 +285,13 @@ pub fn get_sessions_internal(processes: &[AgentProcess], agent_type: AgentType) 
             let dir_name = path.file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("");
+
+            // Skip directories that can't match any running process.
+            // This avoids opening hundreds of JSONL files in inactive project directories.
+            if !expected_dir_names.contains(dir_name) {
+                trace!("Skipping unmatched project dir: {}", dir_name);
+                continue;
+            }
 
             // Get all recent JSONL files and extract cwd from each.
             // Multiple real paths can collide into the same encoded directory
@@ -471,7 +505,8 @@ pub fn parse_session_file(
 
     // Parse the JSONL file to get session info
     let file = File::open(jsonl_path).ok()?;
-    let reader = BufReader::new(file);
+    let file_size = file.metadata().ok().map(|m| m.len()).unwrap_or(0);
+    let mut reader = BufReader::new(file);
 
     let mut session_id = None;
     let mut git_branch = None;
@@ -490,6 +525,17 @@ pub fn parse_session_file(
     // Read last N lines for efficiency
     // Must be large enough to cover long stretches of progress entries during tool execution
     // (observed up to 275 consecutive non-content lines in real sessions)
+    //
+    // For large files, seek to near the end instead of reading the entire file.
+    // 512KB is more than enough for 500 JSONL lines.
+    const TAIL_BYTES: u64 = 512 * 1024;
+    if file_size > TAIL_BYTES {
+        let _ = reader.seek(SeekFrom::End(-(TAIL_BYTES as i64)));
+        // Discard partial line after seeking into the middle of the file
+        let mut _partial = String::new();
+        let _ = reader.read_line(&mut _partial);
+    }
+
     let lines: Vec<_> = reader.lines().flatten().collect();
     let recent_lines: Vec<_> = lines.iter().rev().take(500).collect();
 

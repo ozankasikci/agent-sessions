@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0] - 2026-04-06
+
+### Performance
+- Share single system process scanner between Claude and OpenCode detectors (was scanning entire process table twice per poll)
+- Pre-filter project directories by active process CWDs — skip scanning inactive projects entirely (was opening 267+ files in inactive directories)
+- Cache git remote URL lookups — subprocess only runs once per project instead of every 2s poll
+- Tail-seek large JSONL session files — read last 512KB instead of entire multi-MB file
+- Remove unused `rusqlite` bundled dependency (eliminates SQLite C compilation from clean builds)
+- Add release profile optimizations (LTO, single codegen unit, symbol stripping)
+
+### Before/After
+- Poll scan time: **22-29 seconds → 14-17ms** (1500x faster)
+- First scan: **22 seconds → 672ms** (33x faster)
+
 ## [0.1.27] - 2026-03-09
 
 ### Fixed

@@ -14,8 +14,8 @@ impl AgentDetector for ClaudeDetector {
         AgentType::Claude
     }
 
-    fn find_processes(&self) -> Vec<AgentProcess> {
-        find_claude_processes()
+    fn find_processes(&self, system: &sysinfo::System) -> Vec<AgentProcess> {
+        find_claude_processes(system)
             .into_iter()
             .map(|p| AgentProcess {
                 pid: p.pid,
