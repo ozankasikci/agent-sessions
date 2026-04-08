@@ -211,6 +211,14 @@ fn test_is_local_slash_command() {
     ]);
     assert!(!is_local_slash_command(&array_non_local));
 
+    // Test XML command-name format (used by Claude Code for slash commands)
+    assert!(is_local_slash_command(&json!("<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>")));
+    assert!(is_local_slash_command(&json!("<command-name>/compact</command-name>\n            <command-message>compact</command-message>\n            <command-args></command-args>")));
+    assert!(is_local_slash_command(&json!("<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>sonnet</command-args>")));
+
+    // XML format with non-local command should NOT match
+    assert!(!is_local_slash_command(&json!("<command-name>/custom-skill</command-name>\n            <command-message>custom-skill</command-message>\n            <command-args></command-args>")));
+
     // Test empty and edge cases
     assert!(!is_local_slash_command(&json!("")));
     assert!(!is_local_slash_command(&json!(null)));

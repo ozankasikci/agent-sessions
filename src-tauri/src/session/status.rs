@@ -103,9 +103,25 @@ pub fn is_local_slash_command(content: &serde_json::Value) -> bool {
         "/vim",
     ];
 
-    local_commands.iter().any(|cmd| {
+    // Check direct command format (e.g., "/clear")
+    if local_commands.iter().any(|cmd| {
         trimmed == *cmd || trimmed.starts_with(&format!("{} ", cmd))
-    })
+    }) {
+        return true;
+    }
+
+    // Check XML command-name format used by Claude Code (e.g., "<command-name>/clear</command-name>...")
+    if let Some(start) = trimmed.find("<command-name>") {
+        let after_tag = &trimmed[start + "<command-name>".len()..];
+        if let Some(end) = after_tag.find("</command-name>") {
+            let cmd_name = after_tag[..end].trim();
+            return local_commands.iter().any(|cmd| {
+                cmd_name == *cmd || cmd_name.starts_with(&format!("{} ", cmd))
+            });
+        }
+    }
+
+    false
 }
 
 /// Returns sort priority for status (lower = higher priority in list)
