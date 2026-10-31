@@ -11,8 +11,21 @@ A macOS desktop app to monitor your AI coding agents in real-time.
 
 ## Supported Agents
 
-- **Claude Code** - Anthropic's official CLI for Claude
-- **OpenCode** - Open-source AI coding assistant
+| Agent | Terminal (CLI) | Desktop app | IDE extension |
+|-------|:---:|:---:|:---:|
+| **Claude Code** | ✅ `claude` | ✅ Claude app | ✅ |
+| **Codex** | ✅ `codex` | ✅ Codex app | ✅ |
+| **Antigravity** | ✅ `agy` | ⚠️ best effort | — |
+| **OpenCode** | ✅ `opencode` | — | — |
+
+Sessions are read locally from each agent's own logs (nothing is sent anywhere):
+
+- Claude Code: `~/.claude/projects/`
+- Codex: `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (or `$CODEX_HOME`)
+- Antigravity: `~/.gemini/antigravity-cli/brain/` (or `$ANTIGRAVITY_HOME`) and `~/.gemini/antigravity/brain/` for the app
+- OpenCode: `~/.local/share/opencode/storage/`
+
+Terminal sessions are matched to their running process by working directory. Desktop apps host many conversations in one process, so while an app is running, its conversations active in the last 30 minutes are shown. The Antigravity app's own conversation store is an undocumented binary format; its sessions are inferred from the files it writes under `brain/`.
 
 ## Features
 

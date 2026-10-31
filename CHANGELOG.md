@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Codex** sessions — the `codex` CLI (matched by working directory) and the Codex desktop app / IDE extension (`codex app-server`, which hosts many conversations in one process). Read from `~/.codex/sessions` (`CODEX_HOME` respected), with status from the turn lifecycle (thinking, running a tool, waiting for approval, done), git branch and active subagent count
+- **Antigravity** sessions — the `agy` CLI (`~/.gemini/antigravity-cli`, `ANTIGRAVITY_HOME` respected, folders from `history.jsonl`, titles from `annotations/`) and best-effort support for the Antigravity desktop app (`~/.gemini/antigravity`)
+- **Claude Code desktop app and IDE sessions** — Claude Code started by the Claude desktop app or an editor extension was previously dropped as an "orphan" (no terminal); these now appear
+- "App" / "IDE" badge on cards for sessions that don't run in a terminal; clicking them brings that app to the front
+- "Kill Session" is hidden for sessions that share one app process, so it can't close every conversation in the app
+
 ## [0.2.1] - 2026-04-08
 
 ### Fixed

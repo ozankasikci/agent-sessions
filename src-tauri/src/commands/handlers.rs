@@ -14,11 +14,19 @@ pub fn get_all_sessions() -> SessionsResponse {
     get_sessions()
 }
 
-/// Focus the terminal containing a specific session
+/// Focus the terminal (or app) containing a specific session
+///
+/// Terminal sessions are focused by TTY. Sessions hosted by a desktop app or IDE
+/// (`app_name` set) have no TTY of their own, so the app is brought to the front.
 #[tauri::command]
-pub fn focus_session(pid: u32, project_path: String) -> Result<(), String> {
-    terminal::focus_terminal_for_pid(pid)
-        .or_else(|_| terminal::focus_terminal_by_path(&project_path))
+pub fn focus_session(pid: u32, project_path: String, app_name: Option<String>) -> Result<(), String> {
+    if let Ok(()) = terminal::focus_terminal_for_pid(pid) {
+        return Ok(());
+    }
+    if let Some(app) = app_name.filter(|a| !a.is_empty()) {
+        return terminal::activate_app(&app);
+    }
+    terminal::focus_terminal_by_path(&project_path)
 }
 
 /// Update the tray icon title with session counts

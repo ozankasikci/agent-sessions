@@ -698,6 +698,7 @@ fn test_get_sessions_internal_process_without_cwd_is_skipped() {
         pid: 99999,
         cpu_usage: 0.0,
         cwd: None,
+        ..Default::default()
     }];
     let sessions = get_sessions_internal(&processes, AgentType::Claude);
     assert!(sessions.is_empty(), "Process without CWD should be skipped");
@@ -709,6 +710,7 @@ fn test_get_sessions_internal_process_with_nonexistent_project_is_skipped() {
         pid: 99999,
         cpu_usage: 0.0,
         cwd: Some(std::path::PathBuf::from("/nonexistent/path/that/does/not/match/any/project")),
+        ..Default::default()
     }];
     let sessions = get_sessions_internal(&processes, AgentType::Claude);
     assert!(sessions.is_empty(), "Process with non-matching CWD should produce no sessions");

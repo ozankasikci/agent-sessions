@@ -1,4 +1,4 @@
-use crate::process::{find_claude_processes, is_orphaned_process, ClaudeProcess};
+use crate::process::{find_claude_processes, is_claude_command, is_orphaned_process, ClaudeProcess};
 use std::path::PathBuf;
 use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 
@@ -9,6 +9,7 @@ fn test_claude_process_creation() {
         cwd: Some(PathBuf::from("/Users/test/Projects/my-project")),
         cpu_usage: 5.5,
         memory: 1024,
+        ..Default::default()
     };
 
     assert_eq!(process.pid, 12345);
@@ -27,6 +28,7 @@ fn test_claude_process_without_cwd() {
         cwd: None,
         cpu_usage: 0.0,
         memory: 0,
+        ..Default::default()
     };
 
     assert_eq!(process.pid, 99999);
@@ -40,6 +42,7 @@ fn test_claude_process_clone() {
         cwd: Some(PathBuf::from("/test/path")),
         cpu_usage: 10.0,
         memory: 2048,
+        ..Default::default()
     };
 
     let cloned = process.clone();
@@ -56,6 +59,7 @@ fn test_claude_process_serialization() {
         cwd: Some(PathBuf::from("/test/path")),
         cpu_usage: 5.5,
         memory: 1024,
+        ..Default::default()
     };
 
     let json = serde_json::to_string(&process).unwrap();
@@ -180,4 +184,19 @@ fn test_is_orphaned_process_with_launchd() {
         // Just verify the function doesn't panic
         let _ = is_orphaned_process(&system, process);
     }
+}
+
+#[test]
+fn test_is_claude_command() {
+    let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert!(is_claude_command(&v(&["claude"])));
+    assert!(is_claude_command(&v(&["/Users/me/.local/bin/claude", "--resume"])));
+    // Claude Code bundled by the desktop app / run through node
+    assert!(is_claude_command(&v(&["/Users/me/Library/Application Support/Claude/claude-code/2.1.0/claude"])));
+    assert!(is_claude_command(&v(&["node", "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js"])));
+    assert!(is_claude_command(&v(&["/opt/node/bin/node", "/app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js"])));
+    // The desktop app's own executable is not a Claude Code session
+    assert!(!is_claude_command(&v(&["/Applications/Claude.app/Contents/MacOS/Claude"])));
+    assert!(!is_claude_command(&v(&["node", "/some/other/cli.js"])));
+    assert!(!is_claude_command(&v(&[])));
 }

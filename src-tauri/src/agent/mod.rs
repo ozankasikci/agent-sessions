@@ -1,16 +1,28 @@
+pub mod antigravity;
 pub mod claude;
+pub mod codex;
+pub mod common;
+pub mod host;
 pub mod opencode;
 
-use crate::session::{Session, SessionsResponse, AgentType};
+use crate::session::{Client, Session, SessionsResponse, AgentType};
 use std::sync::Mutex;
 use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 
 /// Common process info shared across agent types
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AgentProcess {
     pub pid: u32,
     pub cpu_usage: f32,
     pub cwd: Option<std::path::PathBuf>,
+    /// Where the process is hosted (terminal, desktop app, IDE)
+    pub client: Client,
+    /// App to activate when focusing (desktop app / IDE name)
+    pub app_name: Option<String>,
+    /// True for a long-lived server process that hosts many sessions at once
+    /// (Codex app-server, the Antigravity app). Such processes are not tied to a
+    /// single session file, so detectors list recently active sessions instead.
+    pub is_host: bool,
 }
 
 // Shared System instance — refreshed once per poll cycle, used by all detectors.
@@ -41,6 +53,8 @@ pub fn get_all_sessions() -> SessionsResponse {
     let detectors: Vec<Box<dyn AgentDetector>> = vec![
         Box::new(claude::ClaudeDetector),
         Box::new(opencode::OpenCodeDetector),
+        Box::new(codex::CodexDetector),
+        Box::new(antigravity::AntigravityDetector),
     ];
 
     // Phase 1: Refresh shared system once, discover all processes

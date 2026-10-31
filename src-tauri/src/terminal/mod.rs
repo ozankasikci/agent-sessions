@@ -24,6 +24,13 @@ pub fn focus_terminal_for_pid(pid: u32) -> Result<(), String> {
     terminal_app::focus_terminal_app_by_tty(&tty)
 }
 
+/// Bring a macOS app (e.g. "Claude", "Codex", "Antigravity") to the front
+pub fn activate_app(app_name: &str) -> Result<(), String> {
+    // Escape for an AppleScript string literal
+    let escaped = app_name.replace('\\', "\\\\").replace('"', "\\\"");
+    execute_applescript(&format!("tell application \"{}\" to activate", escaped))
+}
+
 /// Fallback: focus terminal by matching path in session name
 pub fn focus_terminal_by_path(path: &str) -> Result<(), String> {
     // Fallback: focus by matching session name (which often contains the path) in iTerm2

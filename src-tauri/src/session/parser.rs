@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use once_cell::sync::Lazy;
 
 use crate::agent::AgentProcess;
-use super::model::{AgentType, Session, SessionStatus, SessionsResponse, JsonlMessage};
+use super::model::{AgentType, Client, Session, SessionStatus, SessionsResponse, JsonlMessage};
 use super::status::{determine_status, has_tool_use, has_tool_result, is_local_slash_command, is_interrupted_request, is_waiting_for_user_input};
 
 /// Track previous status for each session to detect transitions
@@ -67,7 +67,7 @@ fn extract_cwd_from_jsonl(jsonl_path: &PathBuf) -> Option<String> {
 }
 
 /// Get GitHub URL from a project's git remote origin (cached)
-fn get_github_url(project_path: &str) -> Option<String> {
+pub fn get_github_url(project_path: &str) -> Option<String> {
     // Check cache first — avoids spawning a git subprocess on every poll
     {
         let cache = GIT_URL_CACHE.lock().unwrap();
@@ -468,6 +468,8 @@ fn find_session_for_process(
 ) -> Option<Session> {
     let jsonl_path = jsonl_files.get(index)?;
     let mut session = parse_session_file(jsonl_path, project_path, process.pid, process.cpu_usage, agent_type)?;
+    session.client = process.client;
+    session.app_name = process.app_name.clone();
 
     // Count active subagents for this session
     session.active_subagent_count = count_active_subagents(project_dir, &session.id);
@@ -686,5 +688,8 @@ pub fn parse_session_file(
         pid,
         cpu_usage,
         active_subagent_count: 0, // Set by find_session_for_process
+        client: Client::Cli,
+        app_name: None,
+        shared_process: false,
     })
 }

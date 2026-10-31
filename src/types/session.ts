@@ -1,6 +1,9 @@
 export type SessionStatus = 'waiting' | 'processing' | 'thinking' | 'compacting' | 'idle';
 
-export type AgentType = 'claude' | 'opencode';
+export type AgentType = 'claude' | 'opencode' | 'codex' | 'antigravity';
+
+/** Where a session runs: a terminal CLI, a desktop app, or an IDE extension */
+export type SessionClient = 'cli' | 'desktop' | 'ide';
 
 export interface Session {
   id: string;
@@ -16,6 +19,11 @@ export interface Session {
   pid: number;
   cpuUsage: number;
   activeSubagentCount: number;
+  client: SessionClient;
+  /** App to bring to the front when focusing a session without a terminal */
+  appName: string | null;
+  /** One process hosts many sessions (e.g. Codex app-server); killing it ends them all */
+  sharedProcess: boolean;
 }
 
 export interface SessionsResponse {

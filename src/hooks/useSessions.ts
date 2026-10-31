@@ -116,6 +116,7 @@ export function useSessions() {
       await invoke('focus_session', {
         pid: session.pid,
         projectPath: session.projectPath,
+        appName: session.appName,
       });
     } catch (err) {
       console.error('Failed to focus session:', err);

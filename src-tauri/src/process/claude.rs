@@ -3,13 +3,47 @@ use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use std::path::PathBuf;
 
+use crate::agent::host::detect_host;
+use crate::session::Client;
+
 /// Represents a running Claude Code process
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct ClaudeProcess {
     pub pid: u32,
     pub cwd: Option<PathBuf>,
     pub cpu_usage: f32,
     pub memory: u64,
+    /// Terminal CLI, Claude desktop app, or IDE extension
+    #[serde(default)]
+    pub client: Client,
+    /// App to activate when focusing a session without a terminal
+    #[serde(default)]
+    pub app_name: Option<String>,
+}
+
+/// Check whether a command line is a Claude Code agent process.
+///
+/// Matches the `claude` CLI (native binary or npm shim) and Claude Code run through
+/// node (`.../claude-code/cli.js`, `.../claude-agent-sdk/cli.js`), which is how
+/// desktop apps and SDK hosts usually start it. Excludes the Claude desktop app's
+/// own main executable (`Claude.app/Contents/MacOS/Claude`), which also ends in `/claude`
+/// when lowercased.
+pub fn is_claude_command(cmd: &[String]) -> bool {
+    let Some(first) = cmd.first() else { return false };
+    if first.contains(".app/Contents/MacOS/") {
+        return false;
+    }
+    let first_lower = first.to_lowercase();
+    if first_lower == "claude" || first_lower.ends_with("/claude") {
+        return true;
+    }
+    // node .../@anthropic-ai/claude-code/cli.js [args]
+    let is_node = first_lower == "node" || first_lower.ends_with("/node") || first_lower.ends_with("/bun");
+    is_node
+        && cmd.get(1).map(|arg| {
+            let a = arg.to_lowercase();
+            a.ends_with("/cli.js") && (a.contains("claude-code") || a.contains("claude-agent-sdk"))
+        }).unwrap_or(false)
 }
 
 /// Check if a process is orphaned by examining its parent chain.
@@ -60,14 +94,8 @@ pub fn find_claude_processes(system: &System) -> Vec<ClaudeProcess> {
     // First pass: collect all Claude process PIDs
     let mut claude_pids: HashSet<Pid> = HashSet::new();
     for (pid, process) in system.processes() {
-        let cmd = process.cmd();
-        let is_claude = if let Some(first_arg) = cmd.first() {
-            let first_arg_str = first_arg.to_string_lossy().to_lowercase();
-            first_arg_str == "claude" || first_arg_str.ends_with("/claude")
-        } else {
-            false
-        };
-        if is_claude {
+        let cmd: Vec<String> = process.cmd().iter().map(|s| s.to_string_lossy().to_string()).collect();
+        if is_claude_command(&cmd) {
             claude_pids.insert(*pid);
         }
     }
@@ -76,15 +104,10 @@ pub fn find_claude_processes(system: &System) -> Vec<ClaudeProcess> {
 
     // Second pass: collect Claude processes, excluding sub-agents and orphans
     for (pid, process) in system.processes() {
-        let cmd = process.cmd();
+        let cmd: Vec<String> = process.cmd().iter().map(|s| s.to_string_lossy().to_string()).collect();
         let process_name = process.name().to_string_lossy();
 
-        let is_claude = if let Some(first_arg) = cmd.first() {
-            let first_arg_str = first_arg.to_string_lossy().to_lowercase();
-            first_arg_str == "claude" || first_arg_str.ends_with("/claude")
-        } else {
-            false
-        };
+        let is_claude = is_claude_command(&cmd);
 
         // Exclude our own app
         let is_our_app = process_name.contains("claude-sessions")
@@ -131,8 +154,13 @@ pub fn find_claude_processes(system: &System) -> Vec<ClaudeProcess> {
                 }
             }
 
+            // Sessions started by the Claude desktop app or an IDE extension have no
+            // terminal: the app's main process is parented to launchd, so the orphan
+            // check below would wrongly drop them.
+            let host = detect_host(system, *pid);
+
             // Check if process is orphaned (terminal was closed)
-            if is_orphaned_process(system, process) {
+            if host.client == Client::Cli && is_orphaned_process(system, process) {
                 warn!(
                     "Skipping orphaned process: pid={}, cwd={:?}, cpu={:.1}% (parent shell reparented to launchd)",
                     pid.as_u32(),
@@ -143,8 +171,9 @@ pub fn find_claude_processes(system: &System) -> Vec<ClaudeProcess> {
             }
 
             debug!(
-                "Found Claude process: pid={}, cwd={:?}, cpu={:.1}%, mem={}MB",
+                "Found Claude process: pid={}, host={:?}, cwd={:?}, cpu={:.1}%, mem={}MB",
                 pid.as_u32(),
+                host.client,
                 cwd,
                 process.cpu_usage(),
                 process.memory() / 1024 / 1024
@@ -155,6 +184,8 @@ pub fn find_claude_processes(system: &System) -> Vec<ClaudeProcess> {
                 cwd,
                 cpu_usage: process.cpu_usage(),
                 memory: process.memory(),
+                client: host.client,
+                app_name: host.app_name,
             });
         }
     }

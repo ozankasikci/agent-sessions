@@ -1,5 +1,5 @@
 use super::{AgentDetector, AgentProcess};
-use crate::session::{AgentType, Session, SessionStatus};
+use crate::session::{AgentType, Client, Session, SessionStatus};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -98,6 +98,7 @@ fn find_opencode_processes(system: &sysinfo::System) -> Vec<AgentProcess> {
                 pid: pid.as_u32(),
                 cpu_usage: cpu,
                 cwd,
+                ..Default::default()
             });
         }
     }
@@ -298,6 +299,9 @@ fn get_latest_session_for_project(
         pid: process.pid,
         cpu_usage: process.cpu_usage,
         active_subagent_count: 0,
+        client: Client::Cli,
+        app_name: None,
+        shared_process: false,
     })
 }
 
@@ -485,5 +489,8 @@ fn get_global_session_for_directory(
         pid: process.pid,
         cpu_usage: process.cpu_usage,
         active_subagent_count: 0,
+        client: Client::Cli,
+        app_name: None,
+        shared_process: false,
     })
 }

@@ -6,6 +6,18 @@ use serde::{Deserialize, Serialize};
 pub enum AgentType {
     Claude,
     OpenCode,
+    Codex,
+    Antigravity,
+}
+
+/// Where an agent session is hosted: a terminal CLI, a desktop app, or an IDE extension
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Client {
+    #[default]
+    Cli,
+    Desktop,
+    Ide,
 }
 
 /// Represents a Claude Code session
@@ -25,6 +37,13 @@ pub struct Session {
     pub pid: u32,
     pub cpu_usage: f32,
     pub active_subagent_count: usize,
+    /// Where the session runs (terminal CLI, desktop app, IDE extension)
+    pub client: Client,
+    /// macOS app to activate when focusing a session that has no terminal (e.g. "Claude", "Codex")
+    pub app_name: Option<String>,
+    /// True when one process hosts many sessions (e.g. Codex app-server), so killing
+    /// the pid would end every session in that app
+    pub shared_process: bool,
 }
 
 /// Status of a Claude Code session

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Session } from '../types/session';
+import { AgentType, Session, SessionClient } from '../types/session';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -37,13 +37,46 @@ const OpenCodeIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-// Agent icon - Claude always orange (brand color), OpenCode uses status color
-const AgentStatusIcon = ({ type, statusColor }: { type: 'claude' | 'opencode', statusColor: string }) => {
-  if (type === 'claude') {
-    // Claude brand color: coral/orange #D77655
-    return <ClaudeIcon className="w-4 h-4 fill-[#D77655]" />;
+// Codex: a terminal prompt glyph in a rounded square (generic mark, not the OpenAI logo)
+const CodexIcon = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className={className || "w-4 h-4"}>
+    <path d="M5 2h14a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Zm1.3 5.3a1 1 0 0 0 0 1.4L9.6 12l-3.3 3.3a1 1 0 1 0 1.4 1.4l4-4a1 1 0 0 0 0-1.4l-4-4a1 1 0 0 0-1.4 0ZM13 15a1 1 0 1 0 0 2h5a1 1 0 1 0 0-2h-5Z"/>
+  </svg>
+);
+
+// Antigravity: an upward arch (generic mark, not the Google logo)
+const AntigravityIcon = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className={className || "w-4 h-4"}>
+    <path d="M12 2c1.2 0 2.1.8 2.6 2l6.2 14.6c.5 1.2.3 2.4-.6 3a2 2 0 0 1-2.6-.4l-3-3.6a3.4 3.4 0 0 0-5.2 0l-3 3.6a2 2 0 0 1-2.6.4c-.9-.6-1.1-1.8-.6-3L9.4 4C9.9 2.8 10.8 2 12 2Z"/>
+  </svg>
+);
+
+const agentLabels: Record<AgentType, string> = {
+  claude: 'Claude Code',
+  opencode: 'OpenCode',
+  codex: 'Codex',
+  antigravity: 'Antigravity',
+};
+
+const clientLabels: Record<SessionClient, string | null> = {
+  cli: null, // the default, no badge
+  desktop: 'App',
+  ide: 'IDE',
+};
+
+// Agent icon - brand-colored for Claude, Codex and Antigravity; OpenCode uses status color
+const AgentStatusIcon = ({ type, statusColor }: { type: AgentType, statusColor: string }) => {
+  switch (type) {
+    case 'claude':
+      // Claude brand color: coral/orange #D77655
+      return <ClaudeIcon className="w-4 h-4 fill-[#D77655]" />;
+    case 'codex':
+      return <CodexIcon className="w-4 h-4 fill-[#10A37F]" />;
+    case 'antigravity':
+      return <AntigravityIcon className="w-4 h-4 fill-[#4285F4]" />;
+    default:
+      return <OpenCodeIcon className={`w-4 h-4 ${statusColor}`} />;
   }
-  return <OpenCodeIcon className={`w-4 h-4 ${statusColor}`} />;
 };
 
 interface SessionCardProps {
@@ -282,26 +315,32 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
                       Open GitHub
                     </DropdownMenuItem>
                   )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={handleKillSession} className="text-destructive focus:text-destructive">
-                    <svg
-                      className="w-4 h-4 mr-2"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M6 18L18 6M6 6l12 12"
-                      />
-                    </svg>
-                    Kill Session
-                  </DropdownMenuItem>
+                  {!session.sharedProcess && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={handleKillSession} className="text-destructive focus:text-destructive">
+                        <svg
+                          className="w-4 h-4 mr-2"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M6 18L18 6M6 6l12 12"
+                          />
+                        </svg>
+                        Kill Session
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
-              <AgentStatusIcon type={session.agentType} statusColor={config.fillColor} />
+              <span title={[agentLabels[session.agentType], session.appName].filter(Boolean).join(' · ')}>
+                <AgentStatusIcon type={session.agentType} statusColor={config.fillColor} />
+              </span>
             </div>
           </div>
 
@@ -332,6 +371,14 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
               <Badge variant="outline" className={config.badgeClassName}>
                 {config.label}
               </Badge>
+              {clientLabels[session.client] && (
+                <span
+                  className="text-[10px] uppercase tracking-wide text-muted-foreground border border-border rounded px-1 py-px"
+                  title={session.appName ? `Running in ${session.appName}` : undefined}
+                >
+                  {clientLabels[session.client]}
+                </span>
+              )}
               {session.activeSubagentCount > 0 && (
                 <span className="text-xs text-muted-foreground">
                   [+{session.activeSubagentCount}]
