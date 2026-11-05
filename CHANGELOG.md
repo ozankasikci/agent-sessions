@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0] - 2026-11-05
 
 ### Added
 - **Codex** sessions — the `codex` CLI (matched by working directory) and the Codex desktop app / IDE extension (`codex app-server`, which hosts many conversations in one process). Read from `~/.codex/sessions` (`CODEX_HOME` respected), with status from the turn lifecycle (thinking, running a tool, waiting for approval, done), git branch and active subagent count
