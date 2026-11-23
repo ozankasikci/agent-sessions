@@ -234,18 +234,112 @@ pub fn convert_dir_name_to_path(dir_name: &str) -> String {
 }
 
 /// Get all active Claude Code sessions (delegates to agent module)
-pub fn get_sessions() -> SessionsResponse {
-    crate::agent::get_all_sessions()
+pub fn get_sessions(config_dir: Option<&std::path::Path>) -> SessionsResponse {
+    crate::agent::get_all_sessions(config_dir)
 }
 
 /// Internal function to get sessions for a specific agent type
 /// Called by agent detectors (ClaudeDetector, OpenCodeDetector, etc.)
+///
+/// Processes may belong to different Claude profiles (`CLAUDE_CONFIG_DIR`).
+/// Each process is resolved to its config dir, then:
+/// 1. matched exactly via `<config_dir>/sessions/<pid>.json` when available;
+/// 2. otherwise matched heuristically (cwd + recency) against that profile's
+///    `projects/` directory.
 pub fn get_sessions_internal(processes: &[AgentProcess], agent_type: AgentType) -> Vec<Session> {
+    use super::claude_dirs::{default_claude_dir, discover_claude_dirs, find_session_jsonl, profile_label, read_pid_session_info};
+    use std::collections::HashSet;
+
     info!("=== Getting sessions for {:?} ===", agent_type);
     debug!("Found {} processes total", processes.len());
 
     let mut sessions = Vec::new();
+    let Some(default_dir) = default_claude_dir() else {
+        warn!("Could not determine home directory");
+        return sessions;
+    };
+    let known_dirs = discover_claude_dirs();
 
+    // Group processes by their config dir. Files already claimed by an exact
+    // pid match are excluded from heuristic matching in the same profile.
+    let mut by_config_dir: HashMap<PathBuf, Vec<&AgentProcess>> = HashMap::new();
+    let mut claimed_files: HashSet<PathBuf> = HashSet::new();
+
+    for process in processes {
+        let Some(cwd) = &process.cwd else {
+            warn!("Process pid={} has no cwd, skipping", process.pid);
+            continue;
+        };
+        let cwd_str = cwd.to_string_lossy().to_string();
+
+        // Resolve the profile: process env first, then any profile that has a
+        // pid file for this process with a matching cwd, then ~/.claude.
+        let pid_match = |dir: &PathBuf| {
+            read_pid_session_info(dir, process.pid)
+                .filter(|info| info.cwd.as_deref().map_or(true, |c| c == cwd_str))
+        };
+        let (config_dir, pid_info) = match &process.config_dir {
+            Some(dir) => (dir.clone(), pid_match(dir)),
+            None => known_dirs
+                .iter()
+                .find_map(|dir| pid_match(dir).map(|info| (dir.clone(), Some(info))))
+                .unwrap_or_else(|| (default_dir.clone(), None)),
+        };
+        debug!("Process pid={} -> config_dir={:?}, pid_file={}", process.pid, config_dir, pid_info.is_some());
+
+        // Exact match via pid file
+        if let Some(info) = pid_info {
+            if let Some(jsonl_path) = find_session_jsonl(&config_dir, Some(&cwd_str), &info.session_id) {
+                if let Some(mut session) = parse_session_file(&jsonl_path, &cwd_str, process.pid, process.cpu_usage, agent_type.clone()) {
+                    if let Some(project_dir) = jsonl_path.parent() {
+                        session.active_subagent_count = count_active_subagents(&project_dir.to_path_buf(), &session.id);
+                    }
+                    session.client = process.client;
+                    session.app_name = process.app_name.clone();
+                    session.profile = Some(config_dir.to_string_lossy().to_string());
+                    claimed_files.insert(jsonl_path);
+                    record_session(session, &mut sessions);
+                    continue;
+                }
+            }
+            debug!("Pid file for pid={} points to session {} with no usable JSONL, falling back", process.pid, info.session_id);
+        }
+
+        by_config_dir.entry(config_dir).or_default().push(process);
+    }
+
+    for (config_dir, procs) in &by_config_dir {
+        scan_projects_dir(&config_dir.join("projects"), procs, &claimed_files, &agent_type, &mut sessions);
+    }
+
+    // Label sessions with their profile when more than one profile is in play
+    let mut all_dirs: HashSet<PathBuf> = known_dirs.into_iter().collect();
+    all_dirs.extend(sessions.iter().filter_map(|s| s.profile.as_ref().map(PathBuf::from)));
+    for session in &mut sessions {
+        session.profile = if all_dirs.len() > 1 {
+            session.profile.as_deref().map(|dir| profile_label(std::path::Path::new(dir)))
+        } else {
+            None
+        };
+    }
+
+    info!(
+        "=== Session scan complete for {:?}: {} total ===",
+        agent_type, sessions.len()
+    );
+
+    sessions
+}
+
+/// Heuristically match processes (all from one Claude profile) to JSONL files
+/// in that profile's `projects/` directory by cwd and recency.
+fn scan_projects_dir(
+    claude_dir: &PathBuf,
+    processes: &[&AgentProcess],
+    claimed_files: &std::collections::HashSet<PathBuf>,
+    agent_type: &AgentType,
+    sessions: &mut Vec<Session>,
+) {
     // Build a map of cwd -> list of processes (multiple sessions can run in same folder)
     let mut cwd_to_processes: HashMap<String, Vec<&AgentProcess>> = HashMap::new();
     // Pre-compute expected project directory names from process CWDs.
@@ -256,26 +350,20 @@ pub fn get_sessions_internal(processes: &[AgentProcess], agent_type: AgentType) 
             let cwd_str = cwd.to_string_lossy().to_string();
             debug!("Mapping process pid={} to cwd={}", process.pid, cwd_str);
             expected_dir_names.insert(convert_path_to_dir_name(&cwd_str));
+            expected_dir_names.insert(super::claude_dirs::encode_project_dir_name(&cwd_str));
             cwd_to_processes.entry(cwd_str).or_default().push(process);
-        } else {
-            warn!("Process pid={} has no cwd, skipping", process.pid);
         }
     }
-
-    // Scan ~/.claude/projects for session files
-    let claude_dir = dirs::home_dir()
-        .map(|h| h.join(".claude").join("projects"))
-        .unwrap_or_default();
 
     debug!("Claude projects directory: {:?}", claude_dir);
 
     if !claude_dir.exists() {
         warn!("Claude projects directory does not exist: {:?}", claude_dir);
-        return sessions;
+        return;
     }
 
     // For each project directory
-    if let Ok(entries) = fs::read_dir(&claude_dir) {
+    if let Ok(entries) = fs::read_dir(claude_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_dir() {
@@ -297,7 +385,10 @@ pub fn get_sessions_internal(processes: &[AgentProcess], agent_type: AgentType) 
             // Multiple real paths can collide into the same encoded directory
             // (e.g., agent-sessions and agent/sessions both encode to -...-agent-sessions)
             // so we need to match each file's cwd to the process's cwd individually.
-            let jsonl_files = get_recently_active_jsonl_files(&path, 100);
+            let jsonl_files: Vec<PathBuf> = get_recently_active_jsonl_files(&path, 100)
+                .into_iter()
+                .filter(|file| !claimed_files.contains(file))
+                .collect();
             if jsonl_files.is_empty() {
                 trace!("Project {} has no recent JSONL files, skipping", dir_name);
                 continue;
@@ -330,44 +421,43 @@ pub fn get_sessions_internal(processes: &[AgentProcess], agent_type: AgentType) 
                 // Match processes to JSONL files
                 for (index, process) in matching_processes.iter().enumerate() {
                     debug!("Matching process pid={} to JSONL file index {}", process.pid, index);
-                    if let Some(session) = find_session_for_process(files_for_cwd, &path, project_path, process, index, agent_type.clone()) {
-                    // Track status transitions
-                    let mut prev_status_map = PREVIOUS_STATUS.lock().unwrap();
-                    let prev_status = prev_status_map.get(&session.id).cloned();
-
-                    // Log status transition if it changed
-                    if let Some(prev) = &prev_status {
-                        if *prev != session.status {
-                            warn!(
-                                "STATUS TRANSITION: project={}, {:?} -> {:?}, cpu={:.1}%, file_age=?, last_msg_role={:?}",
-                                session.project_name, prev, session.status, session.cpu_usage, session.last_message_role
-                            );
-                        }
+                    if let Some(mut session) = find_session_for_process(files_for_cwd, &path, project_path, process, index, agent_type.clone()) {
+                        // Temporarily holds the config dir path; turned into a label by the caller
+                        session.profile = claude_dir.parent().map(|dir| dir.to_string_lossy().to_string());
+                        record_session(session, sessions);
+                    } else {
+                        warn!("Failed to create session for process pid={} in project {}", process.pid, project_path);
                     }
-
-                    // Update stored status
-                    prev_status_map.insert(session.id.clone(), session.status.clone());
-                    drop(prev_status_map);
-
-                    info!(
-                        "Session created: id={}, project={}, status={:?}, pid={}, cpu={:.1}%",
-                        session.id, session.project_name, session.status, session.pid, session.cpu_usage
-                    );
-                    sessions.push(session);
-                } else {
-                    warn!("Failed to create session for process pid={} in project {}", process.pid, project_path);
                 }
-            }
             }
         }
     }
+}
+
+/// Track status transitions for a session and add it to the result list.
+fn record_session(session: Session, sessions: &mut Vec<Session>) {
+    let mut prev_status_map = PREVIOUS_STATUS.lock().unwrap();
+    let prev_status = prev_status_map.get(&session.id).cloned();
+
+    // Log status transition if it changed
+    if let Some(prev) = &prev_status {
+        if *prev != session.status {
+            warn!(
+                "STATUS TRANSITION: project={}, {:?} -> {:?}, cpu={:.1}%, file_age=?, last_msg_role={:?}",
+                session.project_name, prev, session.status, session.cpu_usage, session.last_message_role
+            );
+        }
+    }
+
+    // Update stored status
+    prev_status_map.insert(session.id.clone(), session.status.clone());
+    drop(prev_status_map);
 
     info!(
-        "=== Session scan complete for {:?}: {} total ===",
-        agent_type, sessions.len()
+        "Session created: id={}, project={}, status={:?}, pid={}, cpu={:.1}%",
+        session.id, session.project_name, session.status, session.pid, session.cpu_usage
     );
-
-    sessions
+    sessions.push(session);
 }
 
 /// Check if a JSONL file is a subagent file (named agent-*.jsonl)
@@ -484,6 +574,47 @@ pub fn parse_session_file(
     pid: u32,
     cpu_usage: f32,
     agent_type: AgentType,
+) -> Option<Session> {
+    parse_session_file_impl(
+        jsonl_path,
+        project_path,
+        pid,
+        cpu_usage,
+        agent_type,
+        false,
+        true,
+    )
+}
+
+/// Parse a Claude JSONL file without requiring a matching terminal process.
+pub(super) fn parse_manual_claude_session(jsonl_path: &PathBuf) -> Option<Session> {
+    let project_path = extract_cwd_from_jsonl(jsonl_path).or_else(|| {
+        jsonl_path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            .map(convert_dir_name_to_path)
+    })?;
+
+    parse_session_file_impl(
+        jsonl_path,
+        &project_path,
+        0,
+        0.0,
+        AgentType::Claude,
+        true,
+        false,
+    )
+}
+
+fn parse_session_file_impl(
+    jsonl_path: &PathBuf,
+    project_path: &str,
+    pid: u32,
+    cpu_usage: f32,
+    agent_type: AgentType,
+    is_manual: bool,
+    resolve_github_url: bool,
 ) -> Option<Session> {
     use std::time::SystemTime;
 
@@ -672,7 +803,9 @@ pub fn parse_session_file(
     });
 
     // Get GitHub URL from git remote
-    let github_url = get_github_url(project_path);
+    let github_url = resolve_github_url
+        .then(|| get_github_url(project_path))
+        .flatten();
 
     Some(Session {
         id: session_id,
@@ -691,5 +824,7 @@ pub fn parse_session_file(
         client: Client::Cli,
         app_name: None,
         shared_process: false,
+        is_manual,
+        profile: None,
     })
 }

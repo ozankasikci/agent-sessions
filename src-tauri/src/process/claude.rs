@@ -19,6 +19,9 @@ pub struct ClaudeProcess {
     /// App to activate when focusing a session without a terminal
     #[serde(default)]
     pub app_name: Option<String>,
+    /// Value of the process's `CLAUDE_CONFIG_DIR`, if set and readable.
+    #[serde(default)]
+    pub config_dir: Option<PathBuf>,
 }
 
 /// Check whether a command line is a Claude Code agent process.
@@ -27,11 +30,12 @@ pub struct ClaudeProcess {
 /// node (`.../claude-code/cli.js`, `.../claude-agent-sdk/cli.js`), which is how
 /// desktop apps and SDK hosts usually start it. Excludes the Claude desktop app's
 /// own main executable (`Claude.app/Contents/MacOS/Claude`), which also ends in `/claude`
-/// when lowercased.
+/// when lowercased. Inside an app bundle only the lowercase `claude` binary counts: the
+/// desktop app ships Claude Code as `.../claude-code/<ver>/claude.app/Contents/MacOS/claude`.
 pub fn is_claude_command(cmd: &[String]) -> bool {
     let Some(first) = cmd.first() else { return false };
     if first.contains(".app/Contents/MacOS/") {
-        return false;
+        return first.ends_with("/MacOS/claude");
     }
     let first_lower = first.to_lowercase();
     if first_lower == "claude" || first_lower.ends_with("/claude") {
@@ -44,6 +48,15 @@ pub fn is_claude_command(cmd: &[String]) -> bool {
             let a = arg.to_lowercase();
             a.ends_with("/cli.js") && (a.contains("claude-code") || a.contains("claude-agent-sdk"))
         }).unwrap_or(false)
+}
+
+/// Read `CLAUDE_CONFIG_DIR` from a process's environment.
+fn process_config_dir(process: &sysinfo::Process) -> Option<PathBuf> {
+    process.environ().iter().find_map(|entry| {
+        let entry = entry.to_str()?;
+        let value = entry.strip_prefix("CLAUDE_CONFIG_DIR=")?;
+        crate::session::claude_dirs::expand_config_dir(value)
+    })
 }
 
 /// Check if a process is orphaned by examining its parent chain.
@@ -171,10 +184,11 @@ pub fn find_claude_processes(system: &System) -> Vec<ClaudeProcess> {
             }
 
             debug!(
-                "Found Claude process: pid={}, host={:?}, cwd={:?}, cpu={:.1}%, mem={}MB",
+                "Found Claude process: pid={}, host={:?}, cwd={:?}, config_dir={:?}, cpu={:.1}%, mem={}MB",
                 pid.as_u32(),
                 host.client,
                 cwd,
+                process_config_dir(process),
                 process.cpu_usage(),
                 process.memory() / 1024 / 1024
             );
@@ -186,6 +200,7 @@ pub fn find_claude_processes(system: &System) -> Vec<ClaudeProcess> {
                 memory: process.memory(),
                 client: host.client,
                 app_name: host.app_name,
+                config_dir: process_config_dir(process),
             });
         }
     }

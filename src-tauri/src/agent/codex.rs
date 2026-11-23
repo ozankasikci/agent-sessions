@@ -149,6 +149,7 @@ fn find_codex_processes(system: &sysinfo::System) -> Vec<AgentProcess> {
             client,
             app_name: host.app_name.or_else(|| (client == Client::Desktop).then(|| "Codex".to_string())),
             is_host,
+            config_dir: None,
         });
     }
     processes
@@ -513,6 +514,8 @@ fn build_session(path: &Path, meta: &CodexMeta, process: &AgentProcess, project_
         client: process.client,
         app_name: process.app_name.clone(),
         shared_process: process.is_host,
+        is_manual: false,
+        profile: None,
     }
 }
 

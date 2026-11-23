@@ -24,6 +24,20 @@ export interface Session {
   appName: string | null;
   /** One process hosts many sessions (e.g. Codex app-server); killing it ends them all */
   sharedProcess: boolean;
+  isManual: boolean;
+  /** Claude profile label; only set when multiple profiles exist */
+  profile?: string | null;
+}
+
+export interface ManualSessionCandidate {
+  id: string;
+  agentType: AgentType;
+  projectName: string;
+  projectPath: string;
+  lastMessage: string | null;
+  lastMessageRole: 'user' | 'assistant' | null;
+  lastActivityAt: string;
+  filePath: string;
 }
 
 export interface SessionsResponse {

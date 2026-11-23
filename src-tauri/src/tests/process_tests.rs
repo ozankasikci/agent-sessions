@@ -197,6 +197,9 @@ fn test_is_claude_command() {
     assert!(is_claude_command(&v(&["/opt/node/bin/node", "/app/node_modules/@anthropic-ai/claude-agent-sdk/cli.js"])));
     // The desktop app's own executable is not a Claude Code session
     assert!(!is_claude_command(&v(&["/Applications/Claude.app/Contents/MacOS/Claude"])));
+    assert!(!is_claude_command(&v(&["/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper"])));
+    // ...but the Claude Code binary the desktop app bundles (as claude.app) is
+    assert!(is_claude_command(&v(&["/Users/me/Library/Application Support/Claude/claude-code/2.1.330/abc/claude.app/Contents/MacOS/claude", "--output-format", "stream-json"])));
     assert!(!is_claude_command(&v(&["node", "/some/other/cli.js"])));
     assert!(!is_claude_command(&v(&[])));
 }

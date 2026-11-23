@@ -24,6 +24,7 @@ impl AgentDetector for ClaudeDetector {
                 client: p.client,
                 app_name: p.app_name,
                 is_host: false,
+                config_dir: p.config_dir,
             })
             .collect()
     }

@@ -105,6 +105,7 @@ fn find_antigravity_processes(system: &sysinfo::System) -> Vec<AgentProcess> {
             client: host.client,
             app_name: host.app_name,
             is_host: false,
+            config_dir: None,
         });
     }
 
@@ -117,6 +118,7 @@ fn find_antigravity_processes(system: &sysinfo::System) -> Vec<AgentProcess> {
             client: Client::Desktop,
             app_name: Some("Antigravity".to_string()),
             is_host: true,
+            config_dir: None,
         });
     }
     processes
@@ -404,6 +406,8 @@ fn build_session(
         client: process.client,
         app_name: process.app_name.clone(),
         shared_process: process.is_host,
+        is_manual: false,
+        profile: None,
     }
 }
 

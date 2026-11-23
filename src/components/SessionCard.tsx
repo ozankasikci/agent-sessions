@@ -82,6 +82,7 @@ const AgentStatusIcon = ({ type, statusColor }: { type: AgentType, statusColor: 
 interface SessionCardProps {
   session: Session;
   onClick: () => void;
+  onUnpin: () => void | Promise<void>;
 }
 
 // Helper to get/set custom data from localStorage
@@ -126,7 +127,7 @@ function setCustomUrl(sessionId: string, url: string) {
   localStorage.setItem(CUSTOM_URLS_KEY, JSON.stringify(urls));
 }
 
-export function SessionCard({ session, onClick }: SessionCardProps) {
+export function SessionCard({ session, onClick, onUnpin }: SessionCardProps) {
   const config = statusConfig[session.status];
   const [customName, setCustomNameState] = useState<string>('');
   const [customUrl, setCustomUrlState] = useState<string>('');
@@ -215,8 +216,8 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
   return (
     <>
       <Card
-        className={`relative group cursor-pointer transition-all duration-200 hover:shadow-lg py-0 gap-0 h-full flex flex-col ${config.cardBg} ${config.cardBorder} hover:border-primary/30`}
-        onClick={onClick}
+        className={`relative group transition-all duration-200 hover:shadow-lg py-0 gap-0 h-full flex flex-col ${session.isManual ? 'cursor-default' : 'cursor-pointer'} ${config.cardBg} ${config.cardBorder} hover:border-primary/30`}
+        onClick={session.isManual ? undefined : onClick}
       >
         <CardContent className="p-4 flex flex-col flex-1">
           {/* Header: Project name + Menu + Status indicator */}
@@ -260,6 +261,7 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
                     variant="ghost"
                     size="sm"
                     className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    aria-label="Session actions"
                   >
                     <svg
                       className="w-4 h-4 text-muted-foreground"
@@ -315,7 +317,22 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
                       Open GitHub
                     </DropdownMenuItem>
                   )}
-                  {!session.sharedProcess && (
+                  {session.isManual ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={onUnpin} className="text-destructive focus:text-destructive">
+                        <svg
+                          className="w-4 h-4 mr-2"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14" />
+                        </svg>
+                        Remove from viewer
+                      </DropdownMenuItem>
+                    </>
+                  ) : !session.sharedProcess && (
                     <>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem onClick={handleKillSession} className="text-destructive focus:text-destructive">
@@ -338,8 +355,16 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
                   )}
                 </DropdownMenuContent>
               </DropdownMenu>
-              <span title={[agentLabels[session.agentType], session.appName].filter(Boolean).join(' · ')}>
+              <span
+                className="flex items-center gap-1"
+                title={[agentLabels[session.agentType], session.appName, session.profile && `profile: ${session.profile}`].filter(Boolean).join(' · ')}
+              >
                 <AgentStatusIcon type={session.agentType} statusColor={config.fillColor} />
+                {session.profile && (
+                  <span className="max-w-[90px] truncate rounded bg-muted px-1 py-px text-[10px] font-medium text-foreground/70">
+                    {session.profile}
+                  </span>
+                )}
               </span>
             </div>
           </div>
@@ -378,6 +403,11 @@ export function SessionCard({ session, onClick }: SessionCardProps) {
                 >
                   {clientLabels[session.client]}
                 </span>
+              )}
+              {session.isManual && (
+                <Badge variant="secondary" className="text-[10px]">
+                  Pinned
+                </Badge>
               )}
               {session.activeSubagentCount > 0 && (
                 <span className="text-xs text-muted-foreground">

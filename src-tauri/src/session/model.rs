@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Type of AI coding agent
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentType {
     Claude,
@@ -44,6 +44,10 @@ pub struct Session {
     /// True when one process hosts many sessions (e.g. Codex app-server), so killing
     /// the pid would end every session in that app
     pub shared_process: bool,
+    pub is_manual: bool,
+    /// Claude profile label (config dir name), set only when several profiles exist.
+    #[serde(default)]
+    pub profile: Option<String>,
 }
 
 /// Status of a Claude Code session

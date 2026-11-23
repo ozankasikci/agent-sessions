@@ -2,7 +2,7 @@ use tauri::Manager;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use std::sync::Mutex;
 
-use crate::session::{get_sessions, SessionsResponse};
+use crate::session::{AgentType, ManualSessionCandidate, SessionsResponse, get_sessions};
 use crate::terminal;
 
 // Store current shortcut for unregistration
@@ -10,8 +10,50 @@ static CURRENT_SHORTCUT: Mutex<Option<Shortcut>> = Mutex::new(None);
 
 /// Get all active Claude Code sessions
 #[tauri::command]
-pub fn get_all_sessions() -> SessionsResponse {
-    get_sessions()
+pub fn get_all_sessions(app: tauri::AppHandle) -> SessionsResponse {
+    let config_dir = app.path().app_config_dir().ok();
+    get_sessions(config_dir.as_deref())
+}
+
+/// List recent Claude and Codex sessions that can be pinned manually.
+#[tauri::command]
+pub fn list_manual_session_candidates(
+    app: tauri::AppHandle,
+) -> Result<Vec<ManualSessionCandidate>, String> {
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("Failed to locate app config directory: {error}"))?;
+    let live_sessions = crate::agent::get_live_sessions();
+    crate::session::list_manual_session_candidates(&config_dir, &live_sessions)
+}
+
+/// Persist a selected Claude or Codex session in the manual session list.
+#[tauri::command]
+pub fn add_manual_session(
+    app: tauri::AppHandle,
+    file_path: String,
+    agent_type: AgentType,
+) -> Result<(), String> {
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("Failed to locate app config directory: {error}"))?;
+    crate::session::add_manual_session(&config_dir, &file_path, agent_type)
+}
+
+/// Remove a manually pinned session from the persisted list.
+#[tauri::command]
+pub fn remove_manual_session(
+    app: tauri::AppHandle,
+    session_id: String,
+    agent_type: AgentType,
+) -> Result<(), String> {
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| format!("Failed to locate app config directory: {error}"))?;
+    crate::session::remove_manual_session(&config_dir, &session_id, agent_type)
 }
 
 /// Focus the terminal (or app) containing a specific session
@@ -20,6 +62,9 @@ pub fn get_all_sessions() -> SessionsResponse {
 /// (`app_name` set) have no TTY of their own, so the app is brought to the front.
 #[tauri::command]
 pub fn focus_session(pid: u32, project_path: String, app_name: Option<String>) -> Result<(), String> {
+    if pid == 0 {
+        return Err("Manually pinned sessions cannot be focused".to_string());
+    }
     if let Ok(()) = terminal::focus_terminal_for_pid(pid) {
         return Ok(());
     }
@@ -104,6 +149,10 @@ pub fn unregister_shortcut(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub fn kill_session(pid: u32) -> Result<(), String> {
     use std::process::Command;
+
+    if pid == 0 {
+        return Err("Manually pinned sessions cannot be killed".to_string());
+    }
 
     // Use SIGKILL (-9) to forcefully terminate the process
     // SIGTERM often doesn't work for agent processes with child processes

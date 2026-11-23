@@ -5,7 +5,8 @@ pub mod common;
 pub mod host;
 pub mod opencode;
 
-use crate::session::{Client, Session, SessionsResponse, AgentType};
+use crate::session::{AgentType, Client, Session, SessionsResponse};
+use std::path::Path;
 use std::sync::Mutex;
 use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 
@@ -23,6 +24,9 @@ pub struct AgentProcess {
     /// (Codex app-server, the Antigravity app). Such processes are not tied to a
     /// single session file, so detectors list recently active sessions instead.
     pub is_host: bool,
+    /// Agent config directory from the process environment (Claude's
+    /// `CLAUDE_CONFIG_DIR`). `None` means unset or unreadable.
+    pub config_dir: Option<std::path::PathBuf>,
 }
 
 // Shared System instance — refreshed once per poll cycle, used by all detectors.
@@ -45,10 +49,10 @@ pub trait AgentDetector: Send + Sync {
     fn find_sessions(&self, processes: &[AgentProcess]) -> Vec<Session>;
 }
 
-/// Get all sessions from all registered agent detectors
-pub fn get_all_sessions() -> SessionsResponse {
+/// Detect live sessions from all registered agent detectors.
+pub(crate) fn get_live_sessions() -> Vec<Session> {
     use std::collections::HashSet;
-    use crate::session::{status_sort_priority, cleanup_stale_status_entries};
+    use crate::session::cleanup_stale_status_entries;
 
     let detectors: Vec<Box<dyn AgentDetector>> = vec![
         Box::new(claude::ClaudeDetector),
@@ -67,6 +71,7 @@ pub fn get_all_sessions() -> SessionsResponse {
                     ProcessRefreshKind::new()
                         .with_cmd(sysinfo::UpdateKind::Always)
                         .with_cwd(sysinfo::UpdateKind::Always)
+                        .with_environ(sysinfo::UpdateKind::OnlyIfNotSet)
                         .with_cpu()
                         .with_memory()
                 )
@@ -77,6 +82,7 @@ pub fn get_all_sessions() -> SessionsResponse {
             ProcessRefreshKind::new()
                 .with_cmd(sysinfo::UpdateKind::Always)
                 .with_cwd(sysinfo::UpdateKind::Always)
+                        .with_environ(sysinfo::UpdateKind::OnlyIfNotSet)
                 .with_cpu()
                 .with_memory()
         );
@@ -96,6 +102,46 @@ pub fn get_all_sessions() -> SessionsResponse {
     // Clean up stale status tracking entries for sessions that no longer exist
     let active_ids: HashSet<String> = all_sessions.iter().map(|s| s.id.clone()).collect();
     cleanup_stale_status_entries(&active_ids);
+
+    all_sessions
+}
+
+/// Merge manually pinned sessions into the live set. A live session always wins.
+pub(crate) fn merge_live_and_manual(
+    mut live_sessions: Vec<Session>,
+    manual_sessions: Vec<Session>,
+) -> Vec<Session> {
+    use std::collections::HashSet;
+
+    let mut seen: HashSet<(AgentType, String)> = live_sessions
+        .iter()
+        .map(|session| (session.agent_type.clone(), session.id.clone()))
+        .collect();
+
+    for session in manual_sessions {
+        let key = (session.agent_type.clone(), session.id.clone());
+        if seen.insert(key) {
+            live_sessions.push(session);
+        }
+    }
+
+    live_sessions
+}
+
+/// Get live and manually pinned sessions, sorted for display.
+pub fn get_all_sessions(config_dir: Option<&Path>) -> SessionsResponse {
+    use crate::session::status_sort_priority;
+
+    let live_sessions = get_live_sessions();
+    let manual_sessions = config_dir
+        .map(|directory| {
+            crate::session::load_pinned_sessions(directory).unwrap_or_else(|error| {
+                log::error!("Failed to load manually pinned sessions: {}", error);
+                Vec::new()
+            })
+        })
+        .unwrap_or_default();
+    let mut all_sessions = merge_live_and_manual(live_sessions, manual_sessions);
 
     // Sort by status priority first, then by most recent activity
     all_sessions.sort_by(|a, b| {

@@ -715,3 +715,105 @@ fn test_get_sessions_internal_process_with_nonexistent_project_is_skipped() {
     let sessions = get_sessions_internal(&processes, AgentType::Claude);
     assert!(sessions.is_empty(), "Process with non-matching CWD should produce no sessions");
 }
+
+#[test]
+fn test_parse_codex_rollout_session() {
+    use crate::session::parse_codex_session_file;
+
+    let jsonl = create_test_jsonl_old(&[
+        r#"{"timestamp":"2026-03-07T05:22:28.491Z","type":"session_meta","payload":{"id":"codex-session-id","timestamp":"2026-03-07T05:22:28.000Z","cwd":"/Users/test/Projects/codex-project","originator":"Codex Desktop","source":"vscode","model_provider":"openai"}}"#,
+        r#"{"timestamp":"2026-03-07T05:23:00.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Please fix the parser"}]}}"#,
+        r#"{"timestamp":"2026-03-07T05:24:00.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"The parser is fixed and covered by tests."}]}}"#,
+        r#"{"timestamp":"2026-03-07T05:24:01.000Z","type":"event_msg","payload":{"type":"token_count"}}"#,
+    ]);
+
+    let session = parse_codex_session_file(&jsonl.path().to_path_buf()).unwrap();
+
+    assert_eq!(session.id, "codex-session-id");
+    assert_eq!(session.agent_type, AgentType::Codex);
+    assert_eq!(session.project_name, "codex-project");
+    assert_eq!(session.project_path, "/Users/test/Projects/codex-project");
+    assert_eq!(
+        session.last_message.as_deref(),
+        Some("The parser is fixed and covered by tests.")
+    );
+    assert_eq!(session.last_message_role.as_deref(), Some("assistant"));
+    assert_eq!(session.last_activity_at, "2026-03-07T05:24:01.000Z");
+    assert_eq!(session.pid, 0);
+    assert_eq!(session.cpu_usage, 0.0);
+    assert!(session.is_manual);
+    assert!(matches!(session.status, SessionStatus::Waiting));
+}
+
+#[test]
+fn test_pinned_store_add_remove_persistence_round_trip() {
+    use crate::session::{
+        add_pin_to_store, read_pins, remove_pin_from_store, PinnedSession,
+    };
+
+    let config_dir = tempfile::tempdir().unwrap();
+    let pin = PinnedSession {
+        file_path: "/tmp/rollout-test.jsonl".to_string(),
+        agent_type: AgentType::Codex,
+        session_id: "persisted-session".to_string(),
+    };
+
+    add_pin_to_store(config_dir.path(), pin.clone()).unwrap();
+    add_pin_to_store(config_dir.path(), pin.clone()).unwrap();
+
+    let persisted = read_pins(config_dir.path()).unwrap();
+    assert_eq!(persisted, vec![pin]);
+    assert!(config_dir.path().join("manual-sessions.json").exists());
+
+    remove_pin_from_store(config_dir.path(), "persisted-session", &AgentType::Codex).unwrap();
+    assert!(read_pins(config_dir.path()).unwrap().is_empty());
+}
+
+#[test]
+fn test_manual_session_dedup_prefers_live_session() {
+    use crate::agent::merge_live_and_manual;
+    use crate::session::Session;
+
+    fn session(id: &str, agent_type: AgentType, pid: u32, is_manual: bool) -> Session {
+        Session {
+            id: id.to_string(),
+            agent_type,
+            project_name: "project".to_string(),
+            project_path: "/tmp/project".to_string(),
+            git_branch: None,
+            github_url: None,
+            status: SessionStatus::Waiting,
+            last_message: None,
+            last_message_role: None,
+            last_activity_at: "2026-03-07T05:24:01.000Z".to_string(),
+            pid,
+            cpu_usage: 0.0,
+            active_subagent_count: 0,
+            client: crate::session::Client::Cli,
+            app_name: None,
+            shared_process: false,
+            is_manual,
+            profile: None,
+        }
+    }
+
+    let live_claude = session("same-id", AgentType::Claude, 1234, false);
+    let manual_claude = session("same-id", AgentType::Claude, 0, true);
+    let manual_codex = session("same-id", AgentType::Codex, 0, true);
+
+    let merged = merge_live_and_manual(
+        vec![live_claude],
+        vec![manual_claude, manual_codex],
+    );
+
+    assert_eq!(merged.len(), 2);
+    let claude = merged
+        .iter()
+        .find(|session| session.agent_type == AgentType::Claude)
+        .unwrap();
+    assert_eq!(claude.pid, 1234);
+    assert!(!claude.is_manual);
+    assert!(merged
+        .iter()
+        .any(|session| session.agent_type == AgentType::Codex && session.is_manual));
+}

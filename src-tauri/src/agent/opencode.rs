@@ -302,6 +302,8 @@ fn get_latest_session_for_project(
         client: Client::Cli,
         app_name: None,
         shared_process: false,
+        is_manual: false,
+        profile: None,
     })
 }
 
@@ -492,5 +494,7 @@ fn get_global_session_for_directory(
         client: Client::Cli,
         app_name: None,
         shared_process: false,
+        is_manual: false,
+        profile: None,
     })
 }

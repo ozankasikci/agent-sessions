@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { SessionGrid } from './components/SessionGrid';
 import { Settings, useHotkeyInit } from './components/Settings';
+import { AddSessionDialog } from './components/AddSessionDialog';
 import { useSessions } from './hooks/useSessions';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
 function App() {
   const [showSettings, setShowSettings] = useState(false);
+  const [showAddSession, setShowAddSession] = useState(false);
   const {
     sessions,
     totalCount,
@@ -15,6 +17,7 @@ function App() {
     error,
     refresh,
     focusSession,
+    removeManualSession,
   } = useSessions();
 
   // Initialize hotkey on app start
@@ -32,7 +35,7 @@ function App() {
           {totalCount > 0 && (
             <div data-tauri-drag-region className="flex items-center gap-2">
               <Badge data-tauri-drag-region variant="secondary" className="font-medium pointer-events-none">
-                {totalCount} active
+                {totalCount} {totalCount === 1 ? 'session' : 'sessions'}
               </Badge>
               {waitingCount > 0 && (
                 <Badge data-tauri-drag-region className="bg-status-waiting/20 text-status-waiting border-status-waiting/30 font-medium pointer-events-none">
@@ -43,6 +46,16 @@ function App() {
           )}
         </div>
         <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setShowAddSession(true)}
+            title="Add session"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14M5 12h14" />
+            </svg>
+          </Button>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -80,6 +93,11 @@ function App() {
 
       {/* Settings Modal */}
       <Settings isOpen={showSettings} onClose={() => setShowSettings(false)} />
+      <AddSessionDialog
+        isOpen={showAddSession}
+        onClose={() => setShowAddSession(false)}
+        onSessionAdded={refresh}
+      />
 
       {/* Main content area */}
       <main className="flex-1 overflow-y-auto p-6">
@@ -99,15 +117,16 @@ function App() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
             </div>
-            <h2 className="text-lg font-medium text-foreground mb-2">No active sessions</h2>
+            <h2 className="text-lg font-medium text-foreground mb-2">No sessions</h2>
             <p className="text-muted-foreground text-sm max-w-xs">
-              Start a Claude session in your terminal to see it here
+              Start an agent in your terminal or add a recent desktop session
             </p>
           </div>
         ) : (
           <SessionGrid
             sessions={sessions}
             onSessionClick={focusSession}
+            onSessionUnpin={removeManualSession}
           />
         )}
       </main>

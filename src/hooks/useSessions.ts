@@ -4,6 +4,10 @@ import { Session, SessionsResponse } from '../types/session';
 
 const POLL_INTERVAL = 2000; // 2 seconds
 
+function getSessionKey(session: Session): string {
+  return `${session.agentType}:${session.id}`;
+}
+
 // Get ordering priority for card stability (only distinguishes active vs idle)
 // This prevents card reordering when status flips between thinking/processing/waiting
 function getOrderingPriority(status: string): number {
@@ -25,19 +29,21 @@ function mergeWithStableOrder(existing: Session[], incoming: Session[]): Session
     return incoming;
   }
 
-  // Create a map of existing positions by session ID
+  // Create a map of existing positions by agent type and session ID
   const existingOrder = new Map<string, number>();
-  existing.forEach((s, idx) => existingOrder.set(s.id, idx));
+  existing.forEach((session, index) => existingOrder.set(getSessionKey(session), index));
 
   // Create a map of existing ordering priorities (coarse: active vs idle)
   const existingPriority = new Map<string, number>();
-  existing.forEach(s => existingPriority.set(s.id, getOrderingPriority(s.status)));
+  existing.forEach((session) => {
+    existingPriority.set(getSessionKey(session), getOrderingPriority(session.status));
+  });
 
   // Check if any session changed ordering tier (only active <-> idle triggers reorder)
   // Status changes within active states (thinking/processing/waiting) don't cause reordering
   let priorityChanged = false;
   for (const session of incoming) {
-    const oldPriority = existingPriority.get(session.id);
+    const oldPriority = existingPriority.get(getSessionKey(session));
     const newPriority = getOrderingPriority(session.status);
     if (oldPriority !== undefined && oldPriority !== newPriority) {
       priorityChanged = true;
@@ -46,7 +52,7 @@ function mergeWithStableOrder(existing: Session[], incoming: Session[]): Session
   }
 
   // Also check for new sessions
-  const hasNewSessions = incoming.some(s => !existingOrder.has(s.id));
+  const hasNewSessions = incoming.some((session) => !existingOrder.has(getSessionKey(session)));
 
   // If priority changed or new sessions appeared, use backend order
   if (priorityChanged || hasNewSessions) {
@@ -55,15 +61,16 @@ function mergeWithStableOrder(existing: Session[], incoming: Session[]): Session
 
   // Otherwise, preserve existing order but update session data
   const incomingMap = new Map<string, Session>();
-  incoming.forEach(s => incomingMap.set(s.id, s));
+  incoming.forEach((session) => incomingMap.set(getSessionKey(session), session));
 
   // Keep existing order, update with new data
   const result: Session[] = [];
   for (const existingSession of existing) {
-    const updated = incomingMap.get(existingSession.id);
+    const key = getSessionKey(existingSession);
+    const updated = incomingMap.get(key);
     if (updated) {
       result.push(updated);
-      incomingMap.delete(existingSession.id);
+      incomingMap.delete(key);
     }
   }
 
@@ -112,6 +119,10 @@ export function useSessions() {
   }, [updateTrayTitle]);
 
   const focusSession = useCallback(async (session: Session) => {
+    if (session.isManual || session.pid === 0) {
+      return;
+    }
+
     try {
       await invoke('focus_session', {
         pid: session.pid,
@@ -122,6 +133,22 @@ export function useSessions() {
       console.error('Failed to focus session:', err);
     }
   }, []);
+
+  const removeManualSession = useCallback(async (session: Session) => {
+    if (!session.isManual) {
+      return;
+    }
+
+    try {
+      await invoke('remove_manual_session', {
+        sessionId: session.id,
+        agentType: session.agentType,
+      });
+      await fetchSessions();
+    } catch (err) {
+      console.error('Failed to remove manual session:', err);
+    }
+  }, [fetchSessions]);
 
   // Initial fetch
   useEffect(() => {
@@ -142,5 +169,6 @@ export function useSessions() {
     error,
     refresh: fetchSessions,
     focusSession,
+    removeManualSession,
   };
 }
