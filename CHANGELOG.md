@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.1] - 2026-11-23
+
+### Added
+- Support multiple Claude Code profiles (`CLAUDE_CONFIG_DIR`, e.g. `~/.claude-work`): sessions from every profile are now detected, not just `~/.claude`
+- Show which profile a session belongs to on its card when more than one profile exists
+- Manually pin Claude Code and Codex sessions from the "Add session" dialog, including sessions without a running terminal process
+
+### Improved
+- Match running processes to their exact session file using Claude Code's per-process session files, making multiple sessions in the same folder more reliable
+
+### Fixed
+- Claude Code sessions started by the Claude desktop app were not detected (the bundled `claude.app/.../claude` binary was mistaken for the desktop app itself)
+
 ## [0.3.0] - 2026-11-05
 
 ### Added
